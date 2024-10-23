@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mirror520/identity/events"
+	"github.com/flarexio/identity/events"
 )
 
 type EventName int

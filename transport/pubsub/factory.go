@@ -12,9 +12,9 @@ import (
 	"github.com/go-kit/kit/sd"
 	"github.com/nats-io/nats.go"
 
-	"github.com/mirror520/identity"
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/user"
 )
 
 func SignInFactory(address string, port int) (sd.Factory, error) {

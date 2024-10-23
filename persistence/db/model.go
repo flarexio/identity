@@ -3,9 +3,9 @@ package db
 import (
 	"gorm.io/gorm"
 
-	"github.com/mirror520/identity/events"
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/events"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/user"
 )
 
 type User struct {

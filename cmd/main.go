@@ -20,18 +20,18 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	consul "github.com/hashicorp/consul/api"
 
-	"github.com/mirror520/identity"
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/events"
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/persistence"
-	"github.com/mirror520/identity/policy"
-	"github.com/mirror520/identity/pubsub"
-	"github.com/mirror520/identity/pubsub/nats"
-	"github.com/mirror520/identity/transport"
+	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/events"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/persistence"
+	"github.com/flarexio/identity/policy"
+	"github.com/flarexio/identity/pubsub"
+	"github.com/flarexio/identity/pubsub/nats"
+	"github.com/flarexio/identity/transport"
 
-	transHTTP "github.com/mirror520/identity/transport/http"
-	transPubSub "github.com/mirror520/identity/transport/pubsub"
+	transHTTP "github.com/flarexio/identity/transport/http"
+	transPubSub "github.com/flarexio/identity/transport/pubsub"
 )
 
 var (

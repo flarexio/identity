@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-kit/kit/sd"
 
-	"github.com/mirror520/identity"
-	"github.com/mirror520/identity/transport/pubsub"
+	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/transport/pubsub"
 )
 
 var (

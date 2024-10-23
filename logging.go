@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/user"
 )
 
 func LoggingMiddleware(log *zap.Logger) ServiceMiddleware {

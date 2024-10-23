@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-kit/kit/endpoint"
 
-	"github.com/mirror520/identity"
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/pubsub"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/pubsub"
+	"github.com/flarexio/identity/user"
 )
 
 func EventHandler(endpoint endpoint.Endpoint) pubsub.MessageHandler {

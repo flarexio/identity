@@ -5,10 +5,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/mirror520/identity"
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/persistence/db"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/persistence/db"
+	"github.com/flarexio/identity/user"
 )
 
 type identityTestSuite struct {

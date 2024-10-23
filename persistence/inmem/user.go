@@ -3,8 +3,8 @@ package inmem
 import (
 	"sync"
 
-	"github.com/mirror520/identity/events"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/events"
+	"github.com/flarexio/identity/user"
 )
 
 type userRepository struct {

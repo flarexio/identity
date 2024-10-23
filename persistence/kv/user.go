@@ -6,9 +6,9 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/events"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/events"
+	"github.com/flarexio/identity/user"
 )
 
 type userRepository struct {

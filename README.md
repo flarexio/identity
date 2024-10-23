@@ -23,7 +23,7 @@ You can install Identity using one of the following methods:
 
    ```shell
    # clone the repository
-   git clone https://github.com/mirror520/identity.git
+   git clone https://github.com/flarexio/identity.git
    
    # navigate to the project directory
    cd identity

@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-kit/kit/endpoint"
 
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/user"
 )
 
 type EndpointSet struct {

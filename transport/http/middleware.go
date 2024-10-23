@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/mirror520/identity/policy"
+	"github.com/flarexio/identity/policy"
 )
 
 type Claims struct {

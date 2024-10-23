@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/mirror520/identity/pubsub"
+	"github.com/flarexio/identity/pubsub"
 )
 
 var instance pubsub.PubSub

@@ -11,9 +11,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/model"
-	"github.com/mirror520/identity/pubsub"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/model"
+	"github.com/flarexio/identity/pubsub"
 )
 
 func init() {

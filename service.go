@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/api/idtoken"
 
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/user"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/user"
 )
 
 var (

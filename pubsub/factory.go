@@ -3,7 +3,7 @@ package pubsub
 import (
 	"errors"
 
-	"github.com/mirror520/identity/conf"
+	"github.com/flarexio/identity/conf"
 )
 
 type factory func(cfg conf.Instance) (PubSub, error)

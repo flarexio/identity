@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/mirror520/identity/conf"
-	"github.com/mirror520/identity/pubsub"
+	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/pubsub"
 )
 
 type natsTestSuite struct {

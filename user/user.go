@@ -8,8 +8,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/mirror520/identity/events"
-	"github.com/mirror520/identity/model"
+	"github.com/flarexio/identity/events"
+	"github.com/flarexio/identity/model"
 )
 
 var (

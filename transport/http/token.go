@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/mirror520/identity/conf"
+	"github.com/flarexio/identity/conf"
 )
 
 var ErrInvalidToken = errors.New("invalid token")
