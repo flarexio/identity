@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/go-kit/kit/endpoint"
+	"github.com/nats-io/nats.go/micro"
 
+	"github.com/flarexio/core/model"
+	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
-	"github.com/flarexio/identity/model"
-	"github.com/flarexio/identity/pubsub"
 	"github.com/flarexio/identity/user"
 )
 
@@ -55,54 +56,40 @@ func EventHandler(endpoint endpoint.Endpoint) pubsub.MessageHandler {
 	}
 }
 
-func SignInHandler(endpoint endpoint.Endpoint) pubsub.MessageHandler {
-	return func(ctx context.Context, msg *pubsub.Message) error {
+func SignInHandler(endpoint endpoint.Endpoint) micro.HandlerFunc {
+	return func(r micro.Request) {
 		var req identity.SignInRequest
-
-		if err := json.Unmarshal(msg.Data, &req); err != nil {
-			result := model.FailureResult(err)
-			bs, err := result.Bytes()
-			if err != nil {
-				return err
-			}
-			return msg.Response(bs)
+		if err := json.Unmarshal(r.Data(), &req); err != nil {
+			r.Error("400", err.Error(), nil)
+			return
 		}
 
+		ctx := context.Background()
 		resp, err := endpoint(ctx, req)
 		if err != nil {
-			result := model.FailureResult(err)
-			bs, err := result.Bytes()
-			if err != nil {
-				return err
-			}
-			return msg.Response(bs)
+			r.Error("417", err.Error(), nil)
+			return
 		}
 
-		result := model.SuccessResult("user signed in")
-		result.Data = resp
-
-		bs, err := result.Bytes()
-		if err != nil {
-			return err
-		}
-
-		return msg.Response(bs)
+		r.RespondJSON(&resp)
 	}
 }
 
-func CheckHealthHandler(endpoint endpoint.Endpoint) pubsub.MessageHandler {
-	return func(_ context.Context, msg *pubsub.Message) error {
+func CheckHealthHandler(endpoint endpoint.Endpoint) micro.HandlerFunc {
+	return func(r micro.Request) {
 		var info *identity.RequestInfo
-		if err := json.Unmarshal(msg.Data, &info); err != nil {
-			return err
+		if err := json.Unmarshal(r.Data(), &info); err != nil {
+			r.Error("400", err.Error(), nil)
+			return
 		}
 
-		ctx := context.WithValue(context.Background(), model.REQUEST_INFO, info)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, model.RequestInfo, info)
+
 		_, err := endpoint(ctx, nil)
 		if err != nil {
-			return msg.Response([]byte(err.Error()))
+			r.Error("417", err.Error(), nil)
+			return
 		}
-
-		return msg.Response([]byte(`ok`))
 	}
 }

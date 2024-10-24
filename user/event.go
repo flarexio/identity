@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarexio/identity/events"
+	"github.com/flarexio/core/events"
 )
 
 type EventName int

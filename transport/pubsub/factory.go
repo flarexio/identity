@@ -13,7 +13,6 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/flarexio/identity"
-	"github.com/flarexio/identity/model"
 	"github.com/flarexio/identity/user"
 )
 
@@ -25,6 +24,7 @@ func SignInFactory(address string, port int) (sd.Factory, error) {
 	}
 
 	return func(instance string) (endpoint.Endpoint, io.Closer, error) {
+		// TODO: instnace
 		return SignInEndpoint(nc, instance+".signin"), nil, nil
 	}, nil
 }
@@ -36,7 +36,7 @@ func SignInEndpoint(nc *nats.Conn, topic string) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		data, err := json.Marshal(req)
+		data, err := json.Marshal(&req)
 		if err != nil {
 			return nil, err
 		}
@@ -46,17 +46,8 @@ func SignInEndpoint(nc *nats.Conn, topic string) endpoint.Endpoint {
 			return nil, err
 		}
 
-		var result *model.Result
-		if err := json.Unmarshal(msg.Data, &result); err != nil {
-			return nil, err
-		}
-
-		if err := result.Error(); err != nil {
-			return nil, err
-		}
-
 		var u *user.User
-		if err := json.Unmarshal(result.Raw, &u); err != nil {
+		if err := json.Unmarshal(msg.Data, &u); err != nil {
 			return nil, err
 		}
 

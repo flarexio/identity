@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/flarexio/identity/model"
+	"github.com/flarexio/core/model"
 	"github.com/flarexio/identity/user"
 )
 
@@ -100,7 +100,7 @@ func (mw *loggingMiddleware) CheckHealth(ctx context.Context) error {
 		zap.String("action", "check_health"),
 	)
 
-	if info, ok := ctx.Value(model.REQUEST_INFO).(*RequestInfo); ok {
+	if info, ok := ctx.Value(model.RequestInfo).(*RequestInfo); ok {
 		log = log.With(zap.String("remote", info.ClientIP))
 		log = log.With(zap.String("user-agent", info.UserAgent))
 	}

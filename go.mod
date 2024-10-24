@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/dgraph-io/badger/v4 v4.3.1
+	github.com/flarexio/core v1.0.4-0.20241024191305-0b8517749f73
 	github.com/gin-contrib/zap v1.1.4
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-kit/kit v0.13.0

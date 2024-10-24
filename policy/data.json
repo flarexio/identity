@@ -8,12 +8,6 @@
                     "update",
                     "remove"
                 ]
-            },
-            {
-                "domain": "identity::hello",
-                "actions": [
-                    "view"
-                ]
             }
         ],
         "user": [

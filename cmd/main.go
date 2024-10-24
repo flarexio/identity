@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go/micro"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -20,14 +20,13 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	consul "github.com/hashicorp/consul/api"
 
+	"github.com/flarexio/core/events"
+	"github.com/flarexio/core/model"
+	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
-	"github.com/flarexio/identity/events"
-	"github.com/flarexio/identity/model"
 	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/policy"
-	"github.com/flarexio/identity/pubsub"
-	"github.com/flarexio/identity/pubsub/nats"
 	"github.com/flarexio/identity/transport"
 
 	transHTTP "github.com/flarexio/identity/transport/http"
@@ -117,7 +116,7 @@ func run(cli *cli.Context) error {
 
 	zap.ReplaceGlobals(log)
 
-	ctx := context.WithValue(context.Background(), model.LOGGER, log)
+	ctx := context.WithValue(context.Background(), model.Logger, log)
 
 	// Add Persistence
 	repo, err := persistence.NewUserRepository(cfg.Persistence)
@@ -157,50 +156,56 @@ func run(cli *cli.Context) error {
 	// Add Transports
 
 	// Add PubSub Transport
-	var pubSub pubsub.PubSub
+	var ps pubsub.NATSPubSub
 	{
 		log := log.With(
 			zap.String("infra", "pubsub"),
 			zap.String("provider", cfg.EventBus.Provider.String()),
 		)
 
-		ps, err := nats.NewNATSPubSub(cfg.Transports.NATS.Internal)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		nats := cfg.Transports.NATS.Internal
+
+		natsPS, err := pubsub.NewNATSPubSub(nats.URL(), cfg.Name, nats.Credentials)
 		if err != nil {
 			log.Error(err.Error())
 			return err
 		}
-		defer ps.Close()
+		defer natsPS.Close()
 
-		stream := cfg.EventBus.Users.Stream
-		if err := ps.AddStream(stream.Name, stream.Config); err != nil {
-			log.Error(err.Error(),
-				zap.String("phase", "add_stream"),
-				zap.String("stream", stream.Name),
-			)
+		log.Info("connected")
+
+		if err := natsPS.AddJetStream(); err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
-		consumer := cfg.EventBus.Users.Consumer
-		if err := ps.AddConsumer(consumer.Name, consumer.Stream, consumer.Config); err != nil {
-			log.Error(err.Error(),
-				zap.String("phase", "add_consumer"),
-				zap.String("consumer", consumer.Name),
-			)
+		users := cfg.EventBus.Users
+		if err := natsPS.AddStreamAndConsumer(ctx, users); err != nil {
+			log.Error(err.Error())
 			return err
+		}
+
+		consumer := pubsub.ConsumerStreamPair{
+			Consumer: users.Consumer.Name,
+			Stream:   users.Consumer.Stream,
 		}
 
 		// SUB users.>
 		endpoint := identity.EventEndpoint(svc)
-		ps.PullSubscribe(
-			consumer.Name,
-			stream.Name,
-			transPubSub.EventHandler(endpoint),
-		)
+		handler := transPubSub.EventHandler(endpoint)
 
-		pubSub = ps
+		if err := natsPS.PullConsume(consumer, handler); err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		ps = natsPS
 	}
 
-	events.ReplaceGlobals(pubSub)
+	events.ReplaceGlobals(ps)
 
 	policy, err := policy.NewRegoPolicy(ctx, conf.Path)
 	if err != nil {
@@ -208,14 +213,30 @@ func run(cli *cli.Context) error {
 	}
 
 	if nats := cfg.Transports.NATS; nats.Enabled {
-		// SUB identity.signin and identity.$INSTANCE.signin
-		signInHandler := transPubSub.SignInHandler(endpoints.SignIn)
-		pubSub.Subscribe("identity.signin", signInHandler)        // NATS LB
-		pubSub.Subscribe(nats.ReqPrefix+".signin", signInHandler) // NATS Direct
+		srv, err := ps.AddService(micro.Config{
+			Name:        "identity",
+			Version:     Version,
+			Description: "Scalable and decentralized user identity management",
+			Metadata: map[string]string{
+				"id": cfg.Name,
+			},
+		})
 
-		// SUB identity.$INSTANCE.health
+		if err != nil {
+			return err
+		}
+
+		root := srv.AddGroup("identity")
+
+		// TODO: reqPrefix
+
+		// SUB identity.signin
+		signInHandler := transPubSub.SignInHandler(endpoints.SignIn)
+		root.AddEndpoint("signin", signInHandler)
+
+		// SUB identity.health
 		checkHealthHandler := transPubSub.CheckHealthHandler(endpoints.CheckHealth)
-		pubSub.Subscribe(nats.ReqPrefix+".health", checkHealthHandler)
+		root.AddEndpoint("health", checkHealthHandler)
 	}
 
 	// Add HTTP Transport
@@ -224,17 +245,6 @@ func run(cli *cli.Context) error {
 	r.Use(gin.Recovery())
 
 	auth := transHTTP.Authorizator(policy)
-
-	r.GET("/hello", auth("identity::hello.view"), func(ctx *gin.Context) {
-		ctx.String(http.StatusOK, "Hello World\n")
-	})
-
-	r.GET("/hello/:id/:name",
-		auth("identity::hello.view", transHTTP.Owner),
-		func(ctx *gin.Context) {
-			ctx.String(http.StatusOK, "Hello %s\n", ctx.Param("name"))
-		},
-	)
 
 	r.GET("/health", transHTTP.CheckHealthHandler(endpoints.CheckHealth))
 
@@ -276,7 +286,7 @@ func run(cli *cli.Context) error {
 }
 
 func Registry(ctx context.Context, cfg *conf.Config) {
-	log, ok := ctx.Value(model.LOGGER).(*zap.Logger)
+	log, ok := ctx.Value(model.Logger).(*zap.Logger)
 	if !ok {
 		log = zap.L()
 	}
@@ -429,7 +439,7 @@ func Registry(ctx context.Context, cfg *conf.Config) {
 }
 
 func Discovery(ctx context.Context, ch chan<- identity.Instance, cfg *conf.Config) {
-	log, ok := ctx.Value(model.LOGGER).(*zap.Logger)
+	log, ok := ctx.Value(model.Logger).(*zap.Logger)
 	if !ok {
 		log = zap.L()
 	}

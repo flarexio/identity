@@ -6,8 +6,8 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 
+	"github.com/flarexio/core/events"
 	"github.com/flarexio/identity/conf"
-	"github.com/flarexio/identity/events"
 	"github.com/flarexio/identity/user"
 )
 

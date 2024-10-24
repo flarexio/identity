@@ -11,9 +11,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/oklog/ulid/v2"
 
+	"github.com/flarexio/core/model"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
-	"github.com/flarexio/identity/model"
 	"github.com/flarexio/identity/user"
 )
 
@@ -226,7 +226,7 @@ func CheckHealthHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			UserAgent: c.Request.UserAgent(),
 		}
 
-		ctx := context.WithValue(context.Background(), model.REQUEST_INFO, info)
+		ctx := context.WithValue(context.Background(), model.RequestInfo, info)
 		_, err := endpoint(ctx, nil)
 		if err != nil {
 			result := model.FailureResult(err)

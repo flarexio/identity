@@ -1,6 +1,6 @@
 name: $INSTANCE_NAME
 
-baseUrl: identity.linyc.idv.tw
+baseUrl: identity.flarex.io
 
 jwt:
   secret: jwt_secret_key
@@ -11,7 +11,7 @@ jwt:
 
 transports:
   http:
-    enabled: true
+    enabled: false
     internal:
       # scheme: http
       # host: identity.mirror520.svc.cluster.local
@@ -21,10 +21,10 @@ transports:
         path: /health
     # external:
     #   scheme: https
-    #   host: identity.linyc.idv.tw
+    #   host: identity.flarex.io
     #   port: 443
   nats:
-    enabled: true
+    enabled: false
     internal:
       scheme: nats
       host: nats
@@ -34,7 +34,7 @@ transports:
       path: identity.$INSTANCE_NAME.health
     external:
       scheme: nats
-      host: nats.linyc.idv.tw
+      host: nats.flarex.io
       port: 4222
     reqPrefix: identity.$INSTANCE_NAME
   loadBalancing:

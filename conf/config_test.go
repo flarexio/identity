@@ -23,7 +23,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	assert.Equal("identity", cfg.Name)
-	assert.Equal("identity.linyc.idv.tw", cfg.BaseURL)
+	assert.Equal("identity.flarex.io", cfg.BaseURL)
 
 	assert.Equal(1*time.Hour, cfg.JWT.Timeout)
 	assert.True(cfg.JWT.Refresh.Enabled)

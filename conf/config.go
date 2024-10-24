@@ -1,7 +1,6 @@
 package conf
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -9,6 +8,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v3"
+
+	"github.com/flarexio/core/pubsub"
 )
 
 var (
@@ -188,10 +189,11 @@ type LoadBalancing struct {
 }
 
 type Instance struct {
-	Scheme string `yaml:"scheme"`
-	Host   string `yaml:"host"`
-	Port   int    `yaml:"port"`
-	Health Health `yaml:"health"`
+	Scheme      string `yaml:"scheme"`
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	Health      Health `yaml:"health"`
+	Credentials string `yaml:"creds"`
 }
 
 func (i *Instance) URL() string {
@@ -307,13 +309,13 @@ func (p TransportProvider) String() string {
 
 type EventBus struct {
 	Provider TransportProvider
-	Users    Users
+	Users    pubsub.StreamConsumer
 }
 
 func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
-		Provider string `yaml:"provider"`
-		Users    Users  `yaml:"users"`
+		Provider string                `yaml:"provider"`
+		Users    pubsub.StreamConsumer `yaml:"users"`
 	}
 
 	if err := value.Decode(&raw); err != nil {
@@ -327,56 +329,6 @@ func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 
 	e.Provider = provider
 	e.Users = raw.Users
-
-	return nil
-}
-
-type Users struct {
-	Stream   Stream
-	Consumer Consumer
-}
-
-type Stream struct {
-	Name   string
-	Config json.RawMessage
-}
-
-func (s *Stream) UnmarshalYAML(value *yaml.Node) error {
-	var raw struct {
-		Name   string
-		Config string
-	}
-
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-
-	s.Name = raw.Name
-	s.Config = json.RawMessage(raw.Config)
-
-	return nil
-}
-
-type Consumer struct {
-	Name   string
-	Stream string
-	Config json.RawMessage
-}
-
-func (c *Consumer) UnmarshalYAML(value *yaml.Node) error {
-	var raw struct {
-		Name   string
-		Stream string
-		Config string
-	}
-
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-
-	c.Name = raw.Name
-	c.Stream = raw.Stream
-	c.Config = json.RawMessage(raw.Config)
 
 	return nil
 }

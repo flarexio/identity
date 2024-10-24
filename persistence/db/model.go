@@ -3,8 +3,8 @@ package db
 import (
 	"gorm.io/gorm"
 
-	"github.com/flarexio/identity/events"
-	"github.com/flarexio/identity/model"
+	"github.com/flarexio/core/events"
+	"github.com/flarexio/core/model"
 	"github.com/flarexio/identity/user"
 )
 
@@ -15,7 +15,7 @@ type User struct {
 	Email    string
 	Status   user.Status
 	Accounts []*SocialAccount
-	model.DataModel
+	DataModel
 }
 
 func NewUser(u *user.User) *User {
@@ -31,7 +31,7 @@ func NewUser(u *user.User) *User {
 		Email:    u.Email,
 		Status:   u.Status,
 		Accounts: accounts,
-		DataModel: model.DataModel{
+		DataModel: DataModel{
 			CreatedAt: u.CreatedAt,
 			UpdatedAt: u.UpdatedAt,
 			DeletedAt: gorm.DeletedAt{
@@ -73,7 +73,7 @@ type SocialAccount struct {
 	UserID   string        `gorm:"primaryKey"`
 	SocialID user.SocialID `gorm:"primaryKey"`
 	Provider user.SocialProvider
-	model.DataModel
+	DataModel
 }
 
 func NewSocialAccount(a *user.SocialAccount, u *user.User) *SocialAccount {
@@ -81,7 +81,7 @@ func NewSocialAccount(a *user.SocialAccount, u *user.User) *SocialAccount {
 		UserID:   u.ID.String(),
 		SocialID: a.SocialID,
 		Provider: a.Provider,
-		DataModel: model.DataModel{
+		DataModel: DataModel{
 			CreatedAt: a.CreatedAt,
 			UpdatedAt: a.UpdatedAt,
 			DeletedAt: gorm.DeletedAt{

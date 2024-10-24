@@ -3,7 +3,7 @@ package inmem
 import (
 	"sync"
 
-	"github.com/flarexio/identity/events"
+	"github.com/flarexio/core/events"
 	"github.com/flarexio/identity/user"
 )
 
