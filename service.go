@@ -3,12 +3,16 @@ package identity
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"google.golang.org/api/idtoken"
 
 	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/user"
+	"github.com/go-resty/resty/v2"
+	"github.com/go-webauthn/webauthn/protocol"
 )
 
 var (
@@ -24,9 +28,9 @@ type Service interface {
 	OTPVerify(otp string, id user.UserID) (*user.User, error)
 	SignIn(credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error)
-	CheckHealth(ctx context.Context) error
-
 	Handler() (EventHandler, error)
+
+	passkeys.PasskeyService
 }
 
 type EventHandler interface {
@@ -40,15 +44,24 @@ type ServiceMiddleware func(Service) Service
 type service struct {
 	users     user.Repository
 	clientIDs map[user.SocialProvider]string
+	client    *resty.Client
 }
 
 func NewService(users user.Repository, cfg conf.Providers) Service {
-	svc := new(service)
-	svc.users = users
-	svc.clientIDs = map[user.SocialProvider]string{
-		user.GOOGLE: cfg.Google.Client.ID,
+	passkeys := cfg.Passkeys
+
+	client := resty.New().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("apiKey", passkeys.PasskeysAPI.Secret).
+		SetBaseURL(passkeys.BaseURL + "/" + passkeys.TenantID)
+
+	return &service{
+		users: users,
+		clientIDs: map[user.SocialProvider]string{
+			user.GOOGLE: cfg.Google.Client.ID,
+		},
+		client: client,
 	}
-	return svc
 }
 
 func (svc *service) Handler() (EventHandler, error) {
@@ -121,6 +134,7 @@ func (svc *service) signInWithGoogle(token string) (*user.User, error) {
 		username := strings.Split(email, "@")[0]
 
 		u = user.NewUser(username, name, email)
+		u.Activate()
 		u.AddSocialAccount(user.GOOGLE, socialID)
 
 		defer u.Notify()
@@ -162,10 +176,6 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 	return u, nil
 }
 
-func (svc *service) CheckHealth(ctx context.Context) error {
-	return nil
-}
-
 func (svc *service) UserRegisteredHandler(e *user.UserRegisteredEvent) error {
 	return svc.users.Store(e.User)
 }
@@ -192,4 +202,105 @@ func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAdded
 	u.UpdatedAt = e.OccuredAt
 
 	return svc.users.Store(u)
+}
+
+func (svc *service) InitializeRegistration(userID string, username string) (*protocol.CredentialCreation, error) {
+	params := map[string]string{
+		"user_id":  userID,
+		"username": username,
+	}
+
+	var (
+		successResult *protocol.CredentialCreation
+		failureResult *passkeys.FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(params).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/registration/initialize")
+
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, failureResult
+	}
+
+	return successResult, nil
+}
+
+func (svc *service) FinalizeRegistration(req *protocol.ParsedCredentialCreationData) (string, error) {
+	var (
+		successResult *passkeys.TokenResult
+		failureResult *passkeys.FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(&req.Raw).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/registration/finalize")
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return "", failureResult
+	}
+
+	return successResult.Token, nil
+}
+
+func (svc *service) InitializeLogin(userID string) (*protocol.CredentialAssertion, string, error) {
+	params := map[string]string{
+		"user_id": userID,
+	}
+
+	var (
+		successResult *protocol.CredentialAssertion
+		failureResult *passkeys.FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(params).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/login/initialize")
+
+	if err != nil {
+		return nil, "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, "", failureResult
+	}
+
+	return successResult, "optional", nil
+}
+
+func (svc *service) FinalizeLogin(req *protocol.ParsedCredentialAssertionData) (string, error) {
+	var (
+		successResult *passkeys.TokenResult
+		failureResult *passkeys.FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(&req.Raw).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/login/finalize")
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return "", failureResult
+	}
+
+	return successResult.Token, nil
 }

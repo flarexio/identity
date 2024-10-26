@@ -1,4 +1,4 @@
-# Identity [![Build Status](https://drone.linyc.idv.tw/api/badges/mirror520/identity/status.svg?ref=refs/heads/main)](https://drone.linyc.idv.tw/mirror520/identity)
+# Identity [![Build Status](https://drone.flarex.io/api/badges/flarexio/identity/status.svg?ref=refs/heads/main)](https://drone.flarex.io/flarexio/identity)
 
 Identity is a scalable and decentralized microservice for user identity management.
 
@@ -29,7 +29,7 @@ You can install Identity using one of the following methods:
    cd identity
    
    # build and install
-   go build -o $GOPATH/bin/identity cmd/main.go
+   go build -o $GOPATH/bin/identity cmd/identity/main.go
    ```
 
 2. Copy the `config.yaml` file to the working directory. You can find an example configuration file in the project repository.

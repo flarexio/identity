@@ -7,7 +7,7 @@ import (
 
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
-	"github.com/flarexio/identity/persistence/db"
+	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/user"
 )
 
@@ -19,7 +19,7 @@ type identityTestSuite struct {
 }
 
 func (suite *identityTestSuite) SetupSuite() {
-	conf.Path = ".."
+	conf.Path = "../.."
 	conf.Port = 8080
 
 	cfg, err := conf.LoadConfig()
@@ -28,12 +28,14 @@ func (suite *identityTestSuite) SetupSuite() {
 		return
 	}
 
+	cfg.Persistence.InMem = true
+
 	suite.token = "YOUR GOOGLE JWT TOKEN" // Token 需由 Google 簽發
 	if cfg.Test.Token != "" {
 		suite.token = cfg.Test.Token
 	}
 
-	users, err := db.NewUserRepository(cfg.Persistence)
+	users, err := persistence.NewUserRepository(cfg.Persistence)
 	if err != nil {
 		suite.Fail(err.Error())
 		return

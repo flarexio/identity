@@ -9,7 +9,6 @@ import (
 	"github.com/go-kit/kit/endpoint"
 	"github.com/nats-io/nats.go/micro"
 
-	"github.com/flarexio/core/model"
 	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/user"
@@ -72,24 +71,5 @@ func SignInHandler(endpoint endpoint.Endpoint) micro.HandlerFunc {
 		}
 
 		r.RespondJSON(&resp)
-	}
-}
-
-func CheckHealthHandler(endpoint endpoint.Endpoint) micro.HandlerFunc {
-	return func(r micro.Request) {
-		var info *identity.RequestInfo
-		if err := json.Unmarshal(r.Data(), &info); err != nil {
-			r.Error("400", err.Error(), nil)
-			return
-		}
-
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, model.RequestInfo, info)
-
-		_, err := endpoint(ctx, nil)
-		if err != nil {
-			r.Error("417", err.Error(), nil)
-			return
-		}
 	}
 }

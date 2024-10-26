@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -216,24 +215,5 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		result := model.SuccessResult("user social account added")
 		result.Data = resp
 		ctx.JSON(http.StatusOK, result)
-	}
-}
-
-func CheckHealthHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		info := &identity.RequestInfo{
-			ClientIP:  c.ClientIP(),
-			UserAgent: c.Request.UserAgent(),
-		}
-
-		ctx := context.WithValue(context.Background(), model.RequestInfo, info)
-		_, err := endpoint(ctx, nil)
-		if err != nil {
-			result := model.FailureResult(err)
-			c.AbortWithStatusJSON(http.StatusExpectationFailed, result)
-			return
-		}
-
-		c.String(http.StatusOK, "ok")
 	}
 }

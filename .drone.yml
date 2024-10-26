@@ -13,16 +13,16 @@ trigger:
 
 steps:
 - name: build
-  image: golang:1.21
+  image: golang:1.23
   volumes:
   - name: deps
     path: /go
   commands:
   - go get ./...
-  - go build cmd/main.go
+  - go build cmd/identity/main.go
 
 - name: test
-  image: golang:1.21
+  image: golang:1.23
   volumes:
   - name: deps
     path: /go
@@ -35,7 +35,7 @@ volumes:
 
 services:
 - name: nats
-  image: nats:2.9.16-alpine
+  image: nats:2.10.18-alpine
   command:
   - --jetstream
 
@@ -54,19 +54,19 @@ trigger:
 
 steps:
 - name: build
-  image: golang:1.21-alpine
+  image: golang:1.23-alpine
   commands:
   - apk add gcc musl-dev
   - go build -ldflags "-X main.Version=${DRONE_TAG}
                        -X main.BuildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
                        -X main.GitCommit=${DRONE_COMMIT}" 
-             -o release/linux/amd64/identity cmd/main.go
+             -o release/linux/amd64/identity cmd/identity/main.go
 
 - name: publish
   image: plugins/docker
   settings:
     dockerfile: build/Dockerfile.linux.amd64
-    repo: mirror770109/identity
+    repo: flarexio/identity
     auto_tag: true
     auto_tag_suffix: linux-amd64
     username:
@@ -89,19 +89,19 @@ trigger:
 
 steps:
 - name: build
-  image: golang:1.21-alpine
+  image: golang:1.23-alpine
   commands:
   - apk add gcc musl-dev
   - go build -ldflags "-X main.Version=${DRONE_TAG}
                        -X main.BuildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
                        -X main.GitCommit=${DRONE_COMMIT}" 
-             -o release/linux/arm64/identity cmd/main.go
+             -o release/linux/arm64/identity cmd/identity/main.go
 
 - name: publish
   image: plugins/docker
   settings:
     dockerfile: build/Dockerfile.linux.arm64
-    repo: mirror770109/identity
+    repo: flarexio/identity
     auto_tag: true
     auto_tag_suffix: linux-arm64
     username:
@@ -109,55 +109,54 @@ steps:
     password: 
       from_secret: REGISTRY_PASSWORD
 
----
-kind: pipeline
-type: docker
-name: release-manifest
-
-platform:
-  arch: amd64
-  os: linux
-
-trigger:
-  event:
-  - tag
-
-steps:
-- name: publish
-  image: plugins/manifest
-  settings:
-    auto_tag: true
-    ignore_missing: true
-    spec: build/manifest.txt
-    username:
-      from_secret: REGISTRY_USERNAME
-    password: 
-      from_secret: REGISTRY_PASSWORD
-
-- name: update-charts
-  image: curlimages/curl:8.00.1
-  commands:
-  - >
-    curl --location https://api.github.com/repos/mirror520/charts/actions/workflows/$WORKFLOW_ID/dispatches
-    --header "Accept: application/vnd.github+json"
-    --header "X-GitHub-Api-Version: 2022-11-28"
-    --header "Content-Type: application/json"
-    --header "Authorization: Bearer $GITHUB_TOKEN"
-    --data '{
-        "ref": "main",
-        "inputs": {
-            "target_chart": "${DRONE_REPO_NAME}",
-            "app_version": "${DRONE_TAG}",
-            "message": "${DRONE_REPO} has released ${DRONE_TAG}"
-        }
-    }'
-  environment:
-    WORKFLOW_ID:
-      from_secret: WORKFLOW_ID
-    GITHUB_TOKEN:
-      from_secret: GITHUB_TOKEN
-      
-
-depends_on:
-  - release-linux-amd64
-  - release-linux-arm64
+# ---
+# kind: pipeline
+# type: docker
+# name: release-manifest
+# 
+# platform:
+#   arch: amd64
+#   os: linux
+# 
+# trigger:
+#   event:
+#   - tag
+# 
+# steps:
+# - name: publish
+#   image: plugins/manifest
+#   settings:
+#     auto_tag: true
+#     ignore_missing: true
+#     spec: build/manifest.txt
+#     username:
+#       from_secret: REGISTRY_USERNAME
+#     password: 
+#       from_secret: REGISTRY_PASSWORD
+# 
+# - name: update-charts
+#   image: curlimages/curl:8.00.1
+#   commands:
+#   - >
+#     curl --location https://api.github.com/repos/mirror520/charts/actions/workflows/$WORKFLOW_ID/dispatches
+#     --header "Accept: application/vnd.github+json"
+#     --header "X-GitHub-Api-Version: 2022-11-28"
+#     --header "Content-Type: application/json"
+#     --header "Authorization: Bearer $GITHUB_TOKEN"
+#     --data '{
+#         "ref": "main",
+#         "inputs": {
+#             "target_chart": "${DRONE_REPO_NAME}",
+#             "app_version": "${DRONE_TAG}",
+#             "message": "${DRONE_REPO} has released ${DRONE_TAG}"
+#         }
+#     }'
+#   environment:
+#     WORKFLOW_ID:
+#       from_secret: WORKFLOW_ID
+#     GITHUB_TOKEN:
+#       from_secret: GITHUB_TOKEN
+# 
+# depends_on:
+#   - release-linux-amd64
+#   - release-linux-arm64

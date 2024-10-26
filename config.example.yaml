@@ -9,37 +9,6 @@ jwt:
     enabled: true
     maximum: 1h30m
 
-transports:
-  http:
-    enabled: false
-    internal:
-      # scheme: http
-      # host: identity.mirror520.svc.cluster.local
-      # port: 80
-      health: 
-        enabled: true
-        path: /health
-    # external:
-    #   scheme: https
-    #   host: identity.flarex.io
-    #   port: 443
-  nats:
-    enabled: false
-    internal:
-      scheme: nats
-      host: nats
-      port: 4222
-    health:
-      enabled: true
-      path: identity.$INSTANCE_NAME.health
-    external:
-      scheme: nats
-      host: nats.flarex.io
-      port: 4222
-    reqPrefix: identity.$INSTANCE_NAME
-  loadBalancing:
-    enabled: false
-
 persistence:
   driver: badger
   name: users
@@ -69,6 +38,15 @@ providers:
     client: 
       id: google_client_id
       secret: google_client_secret
+  passkeys:
+    baseURL: https://passkeys.hanko.io
+    tenantID: 00000000-0000-0000-0000-000000000000
+    api:
+      id: 00000000-0000-0000-0000-000000000000
+      secret: hanko_api_secret
+    origins:
+    - https://identity.flarex.io
+    - https://wallet.flarex.io
 
 test:
   token: YOUR_GOOGLE_JWT_TOKEN

@@ -1,6 +1,7 @@
 package user
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -45,6 +46,16 @@ func (name EventName) String() string {
 func (name *EventName) MarshalJSON() ([]byte, error) {
 	jsonStr := `"` + name.String() + `"`
 	return []byte(jsonStr), nil
+}
+
+func (name *EventName) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	*name = ParseEventName(raw)
+	return nil
 }
 
 type Event struct {

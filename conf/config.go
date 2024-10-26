@@ -3,7 +3,6 @@ package conf
 import (
 	"errors"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -39,7 +38,7 @@ func LoadEnv(cli *cli.Context) error {
 			return err
 		}
 
-		path = homeDir + "/.identity"
+		path = homeDir + "/.flarex/identity"
 	}
 
 	Path = path
@@ -71,7 +70,6 @@ type Config struct {
 	Name        string      `yaml:"name"`
 	BaseURL     string      `yaml:"baseUrl"`
 	JWT         JWT         `yaml:"jwt"`
-	Transports  Transports  `yaml:"transports"`
 	Persistence Persistence `yaml:"persistence"`
 	EventBus    EventBus    `yaml:"eventBus"`
 	Providers   Providers   `yaml:"providers"`
@@ -132,77 +130,6 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	return nil
-}
-
-type Transports struct {
-	HTTP          RegisterHTTP  `yaml:"http"`
-	NATS          RegisterNATS  `yaml:"nats"`
-	LoadBalancing LoadBalancing `yaml:"loadBalancing"`
-}
-
-type RegisterHTTP struct {
-	Enabled  bool
-	Internal Instance
-	External *Instance
-}
-
-func (r *RegisterHTTP) UnmarshalYAML(value *yaml.Node) error {
-	var raw struct {
-		Enabled  bool      `yaml:"enabled"`
-		Internal Instance  `yaml:"internal"`
-		External *Instance `yaml:"external"`
-	}
-
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-
-	r.Enabled = raw.Enabled
-	r.Internal = raw.Internal
-	r.External = raw.External
-
-	// default
-	if r.Internal.Scheme == "" {
-		r.Internal.Scheme = "http"
-	}
-
-	if r.Internal.Host == "" {
-		r.Internal.Host = "localhost"
-	}
-
-	if r.Internal.Port == 0 {
-		r.Internal.Port = Port
-	}
-
-	return nil
-}
-
-type RegisterNATS struct {
-	Enabled   bool      `yaml:"enabled"`
-	Internal  Instance  `yaml:"internal"`
-	External  *Instance `yaml:"external"`
-	ReqPrefix string    `yaml:"reqPrefix"`
-}
-
-type LoadBalancing struct {
-	Enabled bool `yaml:"enabled"`
-}
-
-type Instance struct {
-	Scheme      string `yaml:"scheme"`
-	Host        string `yaml:"host"`
-	Port        int    `yaml:"port"`
-	Health      Health `yaml:"health"`
-	Credentials string `yaml:"creds"`
-}
-
-func (i *Instance) URL() string {
-	return i.Scheme + "://" + i.Host + ":" + strconv.Itoa(i.Port)
-}
-
-type Health struct {
-	Enabled bool   `yaml:"enabled"`
-	Path    string `yaml:"path"`
 }
 
 type PersistenceDriver int
@@ -335,11 +262,19 @@ func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 
 type Providers struct {
 	Google struct {
-		Client struct {
-			ID     string
-			Secret string
-		}
+		Client OAuthAPI `yaml:"client"`
 	}
+	Passkeys struct {
+		BaseURL     string   `yaml:"baseURL"`
+		TenantID    string   `yaml:"tenantID"`
+		PasskeysAPI OAuthAPI `yaml:"api"`
+		Origins     []string `yaml:"origins"`
+	}
+}
+
+type OAuthAPI struct {
+	ID     string `yaml:"id"`
+	Secret string `yaml:"secret"`
 }
 
 type Test struct {

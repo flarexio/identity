@@ -14,7 +14,6 @@ type EndpointSet struct {
 	SignIn           endpoint.Endpoint
 	OTPVerify        endpoint.Endpoint
 	AddSocialAccount endpoint.Endpoint
-	CheckHealth      endpoint.Endpoint
 }
 
 type RegisterRequest struct {
@@ -100,18 +99,6 @@ func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
 		}
 
 		return u, nil
-	}
-}
-
-type RequestInfo struct {
-	ClientIP  string `json:"client_ip"`
-	UserAgent string `json:"user_agent"`
-}
-
-func CheckHealth(svc Service) endpoint.Endpoint {
-	return func(ctx context.Context, request any) (response any, err error) {
-		err = svc.CheckHealth(ctx)
-		return
 	}
 }
 
