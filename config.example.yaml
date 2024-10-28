@@ -44,9 +44,12 @@ providers:
     api:
       id: 00000000-0000-0000-0000-000000000000
       secret: hanko_api_secret
+    audience: wallet.flarex.io
     origins:
     - https://identity.flarex.io
     - https://wallet.flarex.io
 
 test:
-  token: YOUR_GOOGLE_JWT_TOKEN
+  tokens:
+    google: YOUR_GOOGLE_JWT_TOKEN
+    passkeys: YOUR_PASSKEYS_JWT_TOKEN

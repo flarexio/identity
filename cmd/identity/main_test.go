@@ -7,15 +7,16 @@ import (
 
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/user"
 )
 
 type identityTestSuite struct {
 	suite.Suite
+	cfg   conf.Config
 	svc   identity.Service
 	users user.Repository
-	token string
 }
 
 func (suite *identityTestSuite) SetupSuite() {
@@ -30,18 +31,21 @@ func (suite *identityTestSuite) SetupSuite() {
 
 	cfg.Persistence.InMem = true
 
-	suite.token = "YOUR GOOGLE JWT TOKEN" // Token 需由 Google 簽發
-	if cfg.Test.Token != "" {
-		suite.token = cfg.Test.Token
-	}
-
 	users, err := persistence.NewUserRepository(cfg.Persistence)
 	if err != nil {
 		suite.Fail(err.Error())
 		return
 	}
 
-	suite.svc = identity.NewService(users, cfg.Providers)
+	passkeysSvc, err := passkeys.NewService(cfg.Providers.Passkeys)
+	if err != nil {
+		suite.Fail(err.Error())
+		return
+	}
+
+	svc := identity.NewService(users, passkeysSvc, cfg.Providers)
+
+	suite.svc = svc
 	suite.users = users
 }
 
@@ -89,7 +93,13 @@ func (suite *identityTestSuite) TestRegisterAndVerify() {
 }
 
 func (suite *identityTestSuite) TestSignInWithGoogle() {
-	u, err := suite.svc.SignIn(suite.token, user.GOOGLE)
+	token := suite.cfg.Test.Tokens.Google
+	if token == "" {
+		suite.T().Skip()
+		return
+	}
+
+	u, err := suite.svc.SignIn(token, user.GOOGLE)
 	if err != nil {
 		suite.Error(err)
 		suite.T().Skip()
@@ -104,6 +114,20 @@ func (suite *identityTestSuite) TestSignInWithGoogle() {
 
 	suite.Equal(user.UserRegistered.String(), u.Events()[0].EventName())
 	suite.Equal(user.UserSocialAccountAdded.String(), u.Events()[1].EventName())
+}
+
+func (suite *identityTestSuite) TestSignInWithPasskeys() {
+	token := suite.cfg.Test.Tokens.Passkeys
+	if token == "" {
+		suite.T().Skip()
+		return
+	}
+
+	_, err := suite.svc.SignIn(token, user.PASSKEYS)
+	if err != nil {
+		suite.Fail(err.Error())
+		return
+	}
 }
 
 func (suite *identityTestSuite) TearDownSuite() {

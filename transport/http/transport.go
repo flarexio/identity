@@ -10,93 +10,89 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/flarexio/core/model"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/user"
 )
 
 func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
+	return func(c *gin.Context) {
 		var req identity.RegisterRequest
-		if err := ctx.ShouldBind(&req); err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+		if err := c.ShouldBind(&req); err != nil {
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
-		resp, err := endpoint(ctx, req)
+		resp, err := endpoint(c, req)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusForbidden, result)
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
 
-		result := model.SuccessResult("user registered")
-		result.Data = resp
-		ctx.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, &resp)
 	}
 }
 
 func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		id := ctx.Param("id")
+	return func(c *gin.Context) {
+		id := c.Param("id")
 		if id == "" {
+			c.Abort()
+
 			err := errors.New("id not found")
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
 		userID, err := user.ParseID(id)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
 		var req identity.OTPVerifyRequest
-		if err := ctx.ShouldBind(&req); err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+		if err := c.ShouldBind(&req); err != nil {
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 		req.UserID = userID
 
-		resp, err := endpoint(ctx, req)
+		resp, err := endpoint(c, req)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusForbidden, result)
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
 
-		result := model.SuccessResult("user verified")
-		result.Data = resp
-		ctx.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, &resp)
 	}
 }
 
 func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
+	return func(c *gin.Context) {
 		var req identity.SignInRequest
-		err := ctx.ShouldBind(&req)
+		err := c.ShouldBind(&req)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
-		resp, err := endpoint(ctx, req)
+		resp, err := endpoint(c, req)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusExpectationFailed, result)
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
 
 		u, ok := resp.(*user.User)
 		if !ok {
 			err := errors.New("invalid user")
-			unauthorized(ctx, http.StatusExpectationFailed, err)
+			unauthorized(c, http.StatusExpectationFailed, err)
 			return
 		}
 
@@ -117,7 +113,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 		tokenStr, err := token.SignedString(cfg.JWT.Secret)
 		if err != nil {
-			unauthorized(ctx, http.StatusExpectationFailed, err)
+			unauthorized(c, http.StatusExpectationFailed, err)
 			return
 		}
 
@@ -126,37 +122,35 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			ExpiredAt: now.Add(cfg.JWT.Timeout),
 		}
 
-		result := model.SuccessResult("user signed in")
-		result.Data = resp
-		ctx.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, &resp)
 	}
 }
 
-func unauthorized(ctx *gin.Context, code int, err error) {
+func unauthorized(c *gin.Context, code int, err error) {
 	realm := conf.G().BaseURL
 
-	ctx.Abort()
-	ctx.Header("WWW-Authenticate", "Bearer realm="+realm)
-	ctx.String(code, err.Error())
+	c.Abort()
+	c.Header("WWW-Authenticate", "Bearer realm="+realm)
+	c.String(code, err.Error())
 }
 
-func RefreshHandler(ctx *gin.Context) {
+func RefreshHandler(c *gin.Context) {
 	cfg := conf.G()
 	if !cfg.JWT.Refresh.Enabled {
-		ctx.Abort()
-		ctx.String(http.StatusForbidden, "token refresh disabled")
+		c.Abort()
+		c.String(http.StatusForbidden, "token refresh disabled")
 		return
 	}
 
 	var claims Claims
-	if err := ParseToken(ctx, &claims); err != nil {
-		unauthorized(ctx, http.StatusUnauthorized, err)
+	if err := ParseToken(c, &claims); err != nil {
+		unauthorized(c, http.StatusUnauthorized, err)
 		return
 	}
 
 	if time.Since(claims.IssuedAt.Time) > cfg.JWT.Refresh.Maximum {
 		err := errors.New("token beyond refresh time")
-		unauthorized(ctx, http.StatusForbidden, err)
+		unauthorized(c, http.StatusForbidden, err)
 		return
 	}
 
@@ -168,7 +162,7 @@ func RefreshHandler(ctx *gin.Context) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, err := token.SignedString(cfg.JWT.Secret)
 	if err != nil {
-		unauthorized(ctx, http.StatusExpectationFailed, err)
+		unauthorized(c, http.StatusExpectationFailed, err)
 		return
 	}
 
@@ -177,43 +171,71 @@ func RefreshHandler(ctx *gin.Context) {
 		ExpiredAt: now.Add(cfg.JWT.Timeout),
 	}
 
-	result := model.SuccessResult("token refreshed")
-	result.Data = t
-	ctx.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, &t)
 }
 
 func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		id := ctx.Param("id")
+	return func(c *gin.Context) {
+		id := c.Param("id")
 		if id == "" {
+			c.Abort()
+
 			err := errors.New("id not found")
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+			c.String(http.StatusBadRequest, err.Error())
+			return
 		}
 
 		userID, err := user.ParseID(id)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
+			return
 		}
 
 		var req identity.AddSocialAccountRequest
-		if err := ctx.ShouldBind(&req); err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, result)
+		if err := c.ShouldBind(&req); err != nil {
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 		req.UserID = userID
 
-		resp, err := endpoint(ctx, req)
+		resp, err := endpoint(c, req)
 		if err != nil {
-			result := model.FailureResult(err)
-			ctx.AbortWithStatusJSON(http.StatusForbidden, result)
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
 
-		result := model.SuccessResult("user social account added")
-		result.Data = resp
-		ctx.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, &resp)
+	}
+}
+
+func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		if id == "" {
+			c.Abort()
+
+			err := errors.New("id not found")
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		userID, err := user.ParseID(id)
+		if err != nil {
+			c.Abort()
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		resp, err := endpoint(c, userID)
+		if err != nil {
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, &resp)
 	}
 }

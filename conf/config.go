@@ -261,15 +261,20 @@ func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type Providers struct {
-	Google struct {
-		Client OAuthAPI `yaml:"client"`
-	}
-	Passkeys struct {
-		BaseURL     string   `yaml:"baseURL"`
-		TenantID    string   `yaml:"tenantID"`
-		PasskeysAPI OAuthAPI `yaml:"api"`
-		Origins     []string `yaml:"origins"`
-	}
+	Google   GoogleProvider   `yaml:"google"`
+	Passkeys PasskeysProvider `yaml:"passkeys"`
+}
+
+type GoogleProvider struct {
+	Client OAuthAPI `yaml:"client"`
+}
+
+type PasskeysProvider struct {
+	BaseURL     string   `yaml:"baseURL"`
+	TenantID    string   `yaml:"tenantID"`
+	PasskeysAPI OAuthAPI `yaml:"api"`
+	Origins     []string `yaml:"origins"`
+	Audience    string   `yaml:"audience"`
 }
 
 type OAuthAPI struct {
@@ -278,5 +283,8 @@ type OAuthAPI struct {
 }
 
 type Test struct {
-	Token string
+	Tokens struct {
+		Google   string `yaml:"google"`
+		Passkeys string `yaml:"passkeys"`
+	}
 }

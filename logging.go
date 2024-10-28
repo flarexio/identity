@@ -3,8 +3,9 @@ package identity
 import (
 	"go.uber.org/zap"
 
-	"github.com/flarexio/identity/user"
 	"github.com/go-webauthn/webauthn/protocol"
+
+	"github.com/flarexio/identity/user"
 )
 
 func LoggingMiddleware(log *zap.Logger) ServiceMiddleware {
@@ -93,6 +94,22 @@ func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.S
 	return u, nil
 }
 
+func (mw *loggingMiddleware) RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error) {
+	log := mw.log.With(
+		zap.String("action", "register_passkey"),
+		zap.String("user_id", id.String()),
+	)
+
+	opts, err := mw.next.RegisterPasskey(id)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, err
+	}
+
+	log.Info("passkey registered")
+	return opts, nil
+}
+
 func (mw *loggingMiddleware) Handler() (EventHandler, error) {
 	return mw, nil
 }
@@ -152,67 +169,4 @@ func (mw *loggingMiddleware) UserSocialAccountAddedHandler(e *user.UserSocialAcc
 
 	log.Info("social account added")
 	return nil
-}
-
-func (mw *loggingMiddleware) InitializeRegistration(userID string, username string) (*protocol.CredentialCreation, error) {
-	log := mw.log.With(
-		zap.String("action", "initialize_registration"),
-		zap.String("user_id", userID),
-		zap.String("username", username),
-	)
-
-	opts, err := mw.next.InitializeRegistration(userID, username)
-	if err != nil {
-		log.Error(err.Error())
-		return nil, err
-	}
-
-	log.Info("registration initialized")
-	return opts, nil
-}
-
-func (mw *loggingMiddleware) FinalizeRegistration(req *protocol.ParsedCredentialCreationData) (string, error) {
-	log := mw.log.With(
-		zap.String("action", "finalize_registration"),
-	)
-
-	token, err := mw.next.FinalizeRegistration(req)
-	if err != nil {
-		log.Error(err.Error())
-		return "", err
-	}
-
-	log.Info("registration finalized", zap.String("token", token))
-	return token, nil
-}
-
-func (mw *loggingMiddleware) InitializeLogin(userID string) (*protocol.CredentialAssertion, string, error) {
-	log := mw.log.With(
-		zap.String("action", "initialize_login"),
-		zap.String("user_id", userID),
-	)
-
-	opts, mediation, err := mw.next.InitializeLogin(userID)
-	if err != nil {
-		log.Error(err.Error())
-		return nil, "", err
-	}
-
-	log.Info("login initialized")
-	return opts, mediation, nil
-}
-
-func (mw *loggingMiddleware) FinalizeLogin(req *protocol.ParsedCredentialAssertionData) (string, error) {
-	log := mw.log.With(
-		zap.String("action", "finalize_login"),
-	)
-
-	token, err := mw.next.FinalizeLogin(req)
-	if err != nil {
-		log.Error(err.Error())
-		return "", err
-	}
-
-	log.Info("login finalized", zap.String("token", token))
-	return token, nil
 }

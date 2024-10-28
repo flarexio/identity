@@ -134,7 +134,12 @@ func run(cli *cli.Context) error {
 	defer cancel()
 
 	// Add Service and Middlewares
-	svc := identity.NewService(repo, cfg.Providers)
+	passkeysSvc, err := passkeys.NewService(cfg.Providers.Passkeys)
+	if err != nil {
+		return err
+	}
+
+	svc := identity.NewService(repo, passkeysSvc, cfg.Providers)
 	svc = identity.LoggingMiddleware(log)(svc)
 
 	// Add Endpoints
@@ -143,13 +148,7 @@ func run(cli *cli.Context) error {
 		SignIn:           identity.SignInEndpoint(svc),
 		OTPVerify:        identity.OTPVerifyEndpoint(svc),
 		AddSocialAccount: identity.AddSocialAccountEndpoint(svc),
-	}
-
-	passkeysEndpoints := passkeys.EndpointSet{
-		InitializeRegistration: passkeys.InitializeRegistrationEndpoint(svc),
-		FinalizeRegistration:   passkeys.FinalizeRegistrationEndpoint(svc),
-		InitializeLogin:        passkeys.InitializeLoginEndpoint(svc),
-		FinalizeLogin:          passkeys.FinalizeLoginEndpoint(svc),
+		RegisterPasskey:  identity.RegisterPasskeyEndpoint(svc),
 	}
 
 	// Add Transports
@@ -254,33 +253,27 @@ func run(cli *cli.Context) error {
 		// PATCH /users/:id/verify
 		apiV1.POST("/users/:id/verify",
 			auth("identity::users.update", transHTTP.Owner),
-			transHTTP.OTPVerifyHandler(endpoints.OTPVerify),
-		)
+			transHTTP.OTPVerifyHandler(endpoints.OTPVerify))
 
 		// PUT /users/id/socials
 		apiV1.POST("/users/:id/socials",
-			auth("identity::users.update", transHTTP.Owner|transHTTP.Admin),
-			transHTTP.AddSocialAccountHandler(endpoints.AddSocialAccount),
-		)
+			auth("identity::users.update", transHTTP.Owner),
+			transHTTP.AddSocialAccountHandler(endpoints.AddSocialAccount))
+
+		// POST /users/:id/passkeys/register
+		apiV1.POST("/users/:id/passkeys/register",
+			auth("identity::users.update", transHTTP.Owner),
+			transHTTP.RegisterPasskeyHandler(endpoints.RegisterPasskey))
 
 		// PATCH /token/refresh
 		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
 
-		// POST /passkeys/registration/initialize
-		apiV1.POST("/passkeys/registration/initialize",
-			passkeys.InitializeRegistrationHandler(passkeysEndpoints.InitializeRegistration))
-
-		// POST /passkeys/registration/finalize
-		apiV1.POST("/passkeys/registration/finalize",
-			passkeys.FinalizeRegistrationHandler(passkeysEndpoints.FinalizeRegistration))
-
-		// POST /passkeys/login/initialize
-		apiV1.POST("/passkeys/login/initialize",
-			passkeys.InitializeLoginHandler(passkeysEndpoints.InitializeLogin))
-
-		// POST /passkeys/login/finalize
-		apiV1.POST("/passkeys/login/finalize",
-			passkeys.FinalizeLoginHandler(passkeysEndpoints.FinalizeLogin))
+		// POST /passkeys/registration
+		{
+			endpoint := passkeys.FinalizeRegistrationEndpoint(passkeysSvc)
+			apiV1.POST("/passkeys/registration",
+				passkeys.FinalizeRegistrationHandler(endpoint))
+		}
 	}
 
 	go r.Run(":" + strconv.Itoa(conf.Port))

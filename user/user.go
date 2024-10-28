@@ -198,6 +198,7 @@ const (
 	GOOGLE   SocialProvider = "google"
 	FACEBOOK SocialProvider = "facebook"
 	LINE     SocialProvider = "line"
+	PASSKEYS SocialProvider = "passkeys"
 )
 
 type SocialID string

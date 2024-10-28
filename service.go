@@ -3,21 +3,20 @@ package identity
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/api/idtoken"
 
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/user"
-	"github.com/go-resty/resty/v2"
-	"github.com/go-webauthn/webauthn/protocol"
 )
 
 var (
 	ErrProviderNotSupported = errors.New("provider not supported")
-	ErrClientIDNotFound     = errors.New("client id not found")
+	ErrAudienceNotFound     = errors.New("audience not found")
 	ErrEmailNotFound        = errors.New("email not found")
 	ErrNameNotFound         = errors.New("name not found")
 	ErrPictureNotFound      = errors.New("picture not found")
@@ -28,9 +27,8 @@ type Service interface {
 	OTPVerify(otp string, id user.UserID) (*user.User, error)
 	SignIn(credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error)
+	RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error)
 	Handler() (EventHandler, error)
-
-	passkeys.PasskeyService
 }
 
 type EventHandler interface {
@@ -41,31 +39,14 @@ type EventHandler interface {
 
 type ServiceMiddleware func(Service) Service
 
+func NewService(users user.Repository, passkeysSvc passkeys.Service, cfg conf.Providers) Service {
+	return &service{cfg, users, passkeysSvc}
+}
+
 type service struct {
-	users     user.Repository
-	clientIDs map[user.SocialProvider]string
-	client    *resty.Client
-}
-
-func NewService(users user.Repository, cfg conf.Providers) Service {
-	passkeys := cfg.Passkeys
-
-	client := resty.New().
-		SetHeader("Content-Type", "application/json").
-		SetHeader("apiKey", passkeys.PasskeysAPI.Secret).
-		SetBaseURL(passkeys.BaseURL + "/" + passkeys.TenantID)
-
-	return &service{
-		users: users,
-		clientIDs: map[user.SocialProvider]string{
-			user.GOOGLE: cfg.Google.Client.ID,
-		},
-		client: client,
-	}
-}
-
-func (svc *service) Handler() (EventHandler, error) {
-	return svc, nil
+	cfg      conf.Providers
+	users    user.Repository
+	passkeys passkeys.Service
 }
 
 func (svc *service) Register(username string, name string, email string) (*user.User, error) {
@@ -97,18 +78,21 @@ func (svc *service) SignIn(credential string, provider user.SocialProvider) (*us
 	switch provider {
 	case user.GOOGLE:
 		return svc.signInWithGoogle(credential)
+	case user.PASSKEYS:
+		return svc.signInWithPasskeys(credential)
 	}
 
 	return nil, ErrProviderNotSupported
 }
 
 func (svc *service) signInWithGoogle(token string) (*user.User, error) {
-	clientID, ok := svc.clientIDs[user.GOOGLE]
-	if !ok {
-		return nil, ErrClientIDNotFound
+	audience := svc.cfg.Google.Client.ID
+	if audience == "" {
+		return nil, ErrAudienceNotFound
 	}
 
-	payload, err := idtoken.Validate(context.Background(), token, clientID)
+	ctx := context.Background()
+	payload, err := idtoken.Validate(ctx, token, audience)
 	if err != nil {
 		return nil, err
 	}
@@ -148,23 +132,61 @@ func (svc *service) signInWithGoogle(token string) (*user.User, error) {
 	return u, nil
 }
 
+func (svc *service) signInWithPasskeys(signed string) (*user.User, error) {
+	token, err := svc.passkeys.VerifyToken(signed)
+	if err != nil {
+		return nil, err
+	}
+
+	subject, err := token.Claims.GetSubject()
+	if err != nil {
+		return nil, err
+	}
+
+	socialID := user.SocialID(subject)
+	return svc.users.FindBySocialID(socialID)
+}
+
 func (svc *service) AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error) {
 	u, err := svc.users.Find(id)
 	if err != nil {
 		return nil, err
 	}
 
-	clientID, ok := svc.clientIDs[user.GOOGLE]
-	if !ok {
-		return nil, ErrClientIDNotFound
+	var subject string
+	switch provider {
+	case user.GOOGLE:
+		audience := svc.cfg.Google.Client.ID
+		if audience == "" {
+			return nil, ErrAudienceNotFound
+		}
+
+		ctx := context.Background()
+		payload, err := idtoken.Validate(ctx, credential, audience)
+		if err != nil {
+			return nil, err
+		}
+
+		subject = payload.Subject
+
+	case user.PASSKEYS:
+		token, err := svc.passkeys.VerifyToken(credential)
+		if err != nil {
+			return nil, err
+		}
+
+		sub, err := token.Claims.GetSubject()
+		if err != nil {
+			return nil, err
+		}
+
+		subject = sub
+
+	default:
+		return nil, ErrProviderNotSupported
 	}
 
-	payload, err := idtoken.Validate(context.Background(), credential, clientID)
-	if err != nil {
-		return nil, err
-	}
-
-	socialID := user.SocialID(payload.Subject)
+	socialID := user.SocialID(subject)
 	_, err = svc.users.FindBySocialID(socialID)
 	if err == nil {
 		return nil, errors.New("account exists")
@@ -174,6 +196,21 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 	defer u.Notify()
 
 	return u, nil
+}
+
+func (svc *service) RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error) {
+	u, err := svc.users.Find(id)
+	if err != nil {
+		return nil, err
+	}
+
+	userID := ulid.Make()
+
+	return svc.passkeys.InitializeRegistration(userID.String(), u.Username)
+}
+
+func (svc *service) Handler() (EventHandler, error) {
+	return svc, nil
 }
 
 func (svc *service) UserRegisteredHandler(e *user.UserRegisteredEvent) error {
@@ -202,105 +239,4 @@ func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAdded
 	u.UpdatedAt = e.OccuredAt
 
 	return svc.users.Store(u)
-}
-
-func (svc *service) InitializeRegistration(userID string, username string) (*protocol.CredentialCreation, error) {
-	params := map[string]string{
-		"user_id":  userID,
-		"username": username,
-	}
-
-	var (
-		successResult *protocol.CredentialCreation
-		failureResult *passkeys.FailureResult
-	)
-
-	resp, err := svc.client.R().
-		SetBody(params).
-		SetResult(&successResult).
-		SetError(&failureResult).
-		Post("/registration/initialize")
-
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return nil, failureResult
-	}
-
-	return successResult, nil
-}
-
-func (svc *service) FinalizeRegistration(req *protocol.ParsedCredentialCreationData) (string, error) {
-	var (
-		successResult *passkeys.TokenResult
-		failureResult *passkeys.FailureResult
-	)
-
-	resp, err := svc.client.R().
-		SetBody(&req.Raw).
-		SetResult(&successResult).
-		SetError(&failureResult).
-		Post("/registration/finalize")
-
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return "", failureResult
-	}
-
-	return successResult.Token, nil
-}
-
-func (svc *service) InitializeLogin(userID string) (*protocol.CredentialAssertion, string, error) {
-	params := map[string]string{
-		"user_id": userID,
-	}
-
-	var (
-		successResult *protocol.CredentialAssertion
-		failureResult *passkeys.FailureResult
-	)
-
-	resp, err := svc.client.R().
-		SetBody(params).
-		SetResult(&successResult).
-		SetError(&failureResult).
-		Post("/login/initialize")
-
-	if err != nil {
-		return nil, "", err
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return nil, "", failureResult
-	}
-
-	return successResult, "optional", nil
-}
-
-func (svc *service) FinalizeLogin(req *protocol.ParsedCredentialAssertionData) (string, error) {
-	var (
-		successResult *passkeys.TokenResult
-		failureResult *passkeys.FailureResult
-	)
-
-	resp, err := svc.client.R().
-		SetBody(&req.Raw).
-		SetResult(&successResult).
-		SetError(&failureResult).
-		Post("/login/finalize")
-
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return "", failureResult
-	}
-
-	return successResult.Token, nil
 }
