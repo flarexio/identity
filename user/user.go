@@ -136,7 +136,6 @@ type User struct {
 	Status   Status           `json:"status"`
 	Accounts []*SocialAccount `json:"accounts"`
 	Avatar   string           `json:"avatar"`
-	Token    Token            `json:"token"`
 	model.Model
 
 	events.EventStore `json:"-"`
@@ -158,7 +157,6 @@ func NewUser(username string, name string, email string) *User {
 		EventStore: events.NewEventStore(),
 	}
 
-	u.Register()
 	return u
 }
 
@@ -218,9 +216,4 @@ func NewSocialAccount(provider SocialProvider, id SocialID) *SocialAccount {
 			UpdatedAt: time.Now(),
 		},
 	}
-}
-
-type Token struct {
-	Token     string    `json:"token"`
-	ExpiredAt time.Time `json:"expired_at"`
 }

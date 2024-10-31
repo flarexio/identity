@@ -85,13 +85,13 @@ func (e *Event) Topic() string {
 
 type UserRegisteredEvent struct {
 	*Event
-	User *User `json:"user"`
+	User User `json:"user"`
 }
 
 func NewUserRegisteredEvent(u *User) events.DomainEvent {
 	return &UserRegisteredEvent{
 		Event: NewEvent(UserRegistered, u),
-		User:  u,
+		User:  *u,
 	}
 }
 
@@ -109,12 +109,12 @@ func NewUserActivatedEvent(u *User, status Status) events.DomainEvent {
 
 type UserSocialAccountAddedEvent struct {
 	*Event
-	Account *SocialAccount `json:"account"`
+	Account SocialAccount `json:"account"`
 }
 
 func NewUserSocialAccountAddedEvent(u *User, account *SocialAccount) events.DomainEvent {
 	return &UserSocialAccountAddedEvent{
 		Event:   NewEvent(UserSocialAccountAdded, u),
-		Account: account,
+		Account: *account,
 	}
 }

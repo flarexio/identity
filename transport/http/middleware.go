@@ -46,10 +46,10 @@ func Authorizator(policy policy.Policy) GinAuth {
 			flags = flags | byte(w)
 		}
 
-		return func(ctx *gin.Context) {
+		return func(c *gin.Context) {
 			var claims Claims
-			if err := ParseToken(ctx, &claims); err != nil {
-				unauthorized(ctx, http.StatusUnauthorized, err)
+			if err := ParseToken(c, &claims); err != nil {
+				unauthorized(c, http.StatusUnauthorized, err)
 				return
 			}
 
@@ -60,22 +60,22 @@ func Authorizator(policy policy.Policy) GinAuth {
 				"claims":    claims.Map(),
 			}
 
-			if id := ctx.Param("id"); id != "" {
+			if id := c.Param("id"); id != "" {
 				input["object"] = id
 			}
 
-			allowed, err := policy.Eval(ctx, input)
+			allowed, err := policy.Eval(c, input)
 			if err != nil {
-				unauthorized(ctx, http.StatusExpectationFailed, err)
+				unauthorized(c, http.StatusExpectationFailed, err)
 				return
 			}
 
 			if !allowed {
-				unauthorized(ctx, http.StatusForbidden, errors.New("forbidden"))
+				unauthorized(c, http.StatusForbidden, errors.New("forbidden"))
 				return
 			}
 
-			ctx.Next()
+			c.Next()
 		}
 	}
 }

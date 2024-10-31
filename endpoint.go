@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/go-kit/kit/endpoint"
 
@@ -65,6 +66,16 @@ type SignInRequest struct {
 	Provider   user.SocialProvider
 }
 
+type SignInResponse struct {
+	User  *user.User `json:"user"`
+	Token *Token     `json:"token"`
+}
+
+type Token struct {
+	Token     string    `json:"token"`
+	ExpiredAt time.Time `json:"expired_at"`
+}
+
 func SignInEndpoint(svc Service) endpoint.Endpoint {
 	return func(ctx context.Context, request any) (response any, err error) {
 		req, ok := request.(SignInRequest)
@@ -77,7 +88,11 @@ func SignInEndpoint(svc Service) endpoint.Endpoint {
 			return nil, err
 		}
 
-		return u, nil
+		resp := SignInResponse{
+			User: u,
+		}
+
+		return resp, nil
 	}
 }
 

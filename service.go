@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-webauthn/webauthn/protocol"
-	"github.com/oklog/ulid/v2"
+	"github.com/google/uuid"
 	"google.golang.org/api/idtoken"
 
 	"github.com/flarexio/identity/conf"
@@ -118,16 +118,20 @@ func (svc *service) signInWithGoogle(token string) (*user.User, error) {
 		username := strings.Split(email, "@")[0]
 
 		u = user.NewUser(username, name, email)
+
+		picture, ok := payload.Claims["picture"].(string)
+		if ok {
+			u.Avatar = picture
+		}
+
+		u.Register()
 		u.Activate()
 		u.AddSocialAccount(user.GOOGLE, socialID)
 
 		defer u.Notify()
 	}
 
-	picture, ok := payload.Claims["picture"].(string)
-	if ok {
-		u.Avatar = picture
-	}
+	// TODO: check if user exists and update from google
 
 	return u, nil
 }
@@ -204,7 +208,7 @@ func (svc *service) RegisterPasskey(id user.UserID) (*protocol.CredentialCreatio
 		return nil, err
 	}
 
-	userID := ulid.Make()
+	userID := uuid.New()
 
 	return svc.passkeys.InitializeRegistration(userID.String(), u.Username)
 }
@@ -214,7 +218,7 @@ func (svc *service) Handler() (EventHandler, error) {
 }
 
 func (svc *service) UserRegisteredHandler(e *user.UserRegisteredEvent) error {
-	return svc.users.Store(e.User)
+	return svc.users.Store(&e.User)
 }
 
 func (svc *service) UserActivatedHandler(e *user.UserActivatedEvent) error {
@@ -235,7 +239,7 @@ func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAdded
 		return err
 	}
 
-	u.Accounts = append(u.Accounts, e.Account)
+	u.Accounts = append(u.Accounts, &e.Account)
 	u.UpdatedAt = e.OccuredAt
 
 	return svc.users.Store(u)

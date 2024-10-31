@@ -89,12 +89,14 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		u, ok := resp.(*user.User)
+		response, ok := resp.(identity.SignInResponse)
 		if !ok {
 			err := errors.New("invalid user")
 			unauthorized(c, http.StatusExpectationFailed, err)
 			return
 		}
+
+		u := response.User
 
 		cfg := conf.G()
 		now := time.Now()
@@ -107,7 +109,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
 			},
-			Roles: []string{"admin"},
+			Roles: []string{"user"},
 		}
 
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -117,12 +119,12 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		u.Token = user.Token{
+		response.Token = &identity.Token{
 			Token:     tokenStr,
 			ExpiredAt: now.Add(cfg.JWT.Timeout),
 		}
 
-		c.JSON(http.StatusOK, &resp)
+		c.JSON(http.StatusOK, &response)
 	}
 }
 
@@ -166,7 +168,7 @@ func RefreshHandler(c *gin.Context) {
 		return
 	}
 
-	t := user.Token{
+	t := identity.Token{
 		Token:     tokenStr,
 		ExpiredAt: now.Add(cfg.JWT.Timeout),
 	}
