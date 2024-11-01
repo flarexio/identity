@@ -3,34 +3,37 @@ package http
 import (
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/flarexio/identity/conf"
 )
-
-var ErrInvalidToken = errors.New("invalid token")
 
 var (
-	keyFn jwt.Keyfunc
-	once  sync.Once
+	ErrTokenNotInit = errors.New("token not initialized")
+	ErrInvalidToken = errors.New("invalid token")
 )
 
-func KeyFn() jwt.Keyfunc {
-	once.Do(func() {
-		secret := conf.G().JWT.Secret
-		keyFn = func(t *jwt.Token) (interface{}, error) {
-			return secret, nil
-		}
-	})
+var (
+	issuer   string
+	audience string
+	keyFn    jwt.Keyfunc
+)
 
-	return keyFn
+func Init(i, a string, secret []byte) {
+	issuer = i
+	audience = a
+
+	keyFn = func(t *jwt.Token) (any, error) {
+		return secret, nil
+	}
 }
 
 func ParseToken(ctx *gin.Context, claims jwt.Claims) error {
+	if audience == "" || keyFn == nil {
+		return ErrTokenNotInit
+	}
+
 	tokenStr := ctx.GetHeader("Authorization")
 	if !strings.HasPrefix(tokenStr, "Bearer ") {
 		return ErrInvalidToken
@@ -38,8 +41,8 @@ func ParseToken(ctx *gin.Context, claims jwt.Claims) error {
 
 	tokenStr = strings.TrimPrefix(tokenStr, "Bearer ")
 
-	_, err := jwt.ParseWithClaims(tokenStr, claims, KeyFn(),
-		jwt.WithIssuer(conf.G().BaseURL),
+	_, err := jwt.ParseWithClaims(tokenStr, claims, keyFn,
+		jwt.WithAudience(audience),
 		jwt.WithLeeway(10*time.Second),
 	)
 

@@ -204,11 +204,6 @@ func run(cli *cli.Context) error {
 
 	events.ReplaceGlobals(ps)
 
-	policy, err := policy.NewRegoPolicy(ctx, conf.Path)
-	if err != nil {
-		return err
-	}
-
 	// Add PubSub Transport
 	{
 		srv, err := ps.AddService(micro.Config{
@@ -240,6 +235,17 @@ func run(cli *cli.Context) error {
 			gin.H{"origins": cfg.Providers.Passkeys.Origins})
 	})
 
+	transHTTP.Init(
+		cfg.BaseURL,          // issuer
+		cfg.JWT.Audiences[0], // audience
+		cfg.JWT.Secret,       // secret
+	)
+
+	policy, err := policy.NewRegoPolicy(ctx, conf.Path)
+	if err != nil {
+		return err
+	}
+
 	auth := transHTTP.Authorizator(policy)
 
 	apiV1 := r.Group("/identity/v1")
@@ -250,18 +256,18 @@ func run(cli *cli.Context) error {
 		// POST /users
 		apiV1.POST("/users", transHTTP.RegisterHandler(endpoints.Register))
 
-		// PATCH /users/:id/verify
-		apiV1.POST("/users/:id/verify",
+		// PATCH /users/:user/verify
+		apiV1.POST("/users/:user/verify",
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.OTPVerifyHandler(endpoints.OTPVerify))
 
-		// PUT /users/id/socials
-		apiV1.POST("/users/:id/socials",
+		// PUT /users/:user/socials
+		apiV1.PUT("/users/:user/socials",
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.AddSocialAccountHandler(endpoints.AddSocialAccount))
 
-		// POST /users/:id/passkeys/register
-		apiV1.POST("/users/:id/passkeys/register",
+		// POST /users/:user/passkeys/register
+		apiV1.POST("/users/:user/passkeys/register",
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.RegisterPasskeyHandler(endpoints.RegisterPasskey))
 

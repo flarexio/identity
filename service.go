@@ -24,10 +24,10 @@ var (
 
 type Service interface {
 	Register(username string, name string, email string) (*user.User, error)
-	OTPVerify(otp string, id user.UserID) (*user.User, error)
+	OTPVerify(otp string, username string) (*user.User, error)
 	SignIn(credential string, provider user.SocialProvider) (*user.User, error)
-	AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error)
-	RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error)
+	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
+	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	Handler() (EventHandler, error)
 }
 
@@ -61,8 +61,8 @@ func (svc *service) Register(username string, name string, email string) (*user.
 	return u, nil
 }
 
-func (svc *service) OTPVerify(otp string, id user.UserID) (*user.User, error) {
-	u, err := svc.users.Find(id)
+func (svc *service) OTPVerify(otp string, username string) (*user.User, error) {
+	u, err := svc.users.FindByUsername(username)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +151,8 @@ func (svc *service) signInWithPasskeys(signed string) (*user.User, error) {
 	return svc.users.FindBySocialID(socialID)
 }
 
-func (svc *service) AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error) {
-	u, err := svc.users.Find(id)
+func (svc *service) AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error) {
+	u, err := svc.users.FindByUsername(username)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +202,8 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 	return u, nil
 }
 
-func (svc *service) RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error) {
-	u, err := svc.users.Find(id)
+func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
+	u, err := svc.users.FindByUsername(username)
 	if err != nil {
 		return nil, err
 	}

@@ -41,8 +41,8 @@ func RegisterEndpoint(svc Service) endpoint.Endpoint {
 }
 
 type OTPVerifyRequest struct {
-	OTP    string
-	UserID user.UserID
+	OTP      string
+	Username string
 }
 
 func OTPVerifyEndpoint(svc Service) endpoint.Endpoint {
@@ -52,7 +52,7 @@ func OTPVerifyEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.OTPVerify(req.OTP, req.UserID)
+		u, err := svc.OTPVerify(req.OTP, req.Username)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +99,7 @@ func SignInEndpoint(svc Service) endpoint.Endpoint {
 type AddSocialAccountRequest struct {
 	Credential string
 	Provider   user.SocialProvider
-	UserID     user.UserID
+	Username   string
 }
 
 func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
@@ -109,7 +109,7 @@ func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.AddSocialAccount(req.Credential, req.Provider, req.UserID)
+		u, err := svc.AddSocialAccount(req.Credential, req.Provider, req.Username)
 		if err != nil {
 			return nil, err
 		}
@@ -120,12 +120,12 @@ func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
 
 func RegisterPasskeyEndpoint(svc Service) endpoint.Endpoint {
 	return func(ctx context.Context, request any) (response any, err error) {
-		userID, ok := request.(user.UserID)
+		username, ok := request.(string)
 		if !ok {
 			return nil, errors.New("invalid request")
 		}
 
-		opts, err := svc.RegisterPasskey(userID)
+		opts, err := svc.RegisterPasskey(username)
 		if err != nil {
 			return nil, err
 		}

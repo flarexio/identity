@@ -60,8 +60,8 @@ func Authorizator(policy policy.Policy) GinAuth {
 				"claims":    claims.Map(),
 			}
 
-			if id := c.Param("id"); id != "" {
-				input["object"] = id
+			if username := c.Param("user"); username != "" {
+				input["object"] = username
 			}
 
 			allowed, err := policy.Eval(c, input)

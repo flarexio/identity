@@ -2,12 +2,10 @@ module github.com/flarexio/identity
 
 go 1.23.0
 
-replace github.com/flarexio/core => ../core
-
 require (
 	github.com/MicahParks/keyfunc/v3 v3.3.5
 	github.com/dgraph-io/badger/v4 v4.3.1
-	github.com/flarexio/core v1.0.4-0.20241024191305-0b8517749f73
+	github.com/flarexio/core v1.0.4
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-kit/kit v0.13.0
 	github.com/go-resty/resty/v2 v2.15.3

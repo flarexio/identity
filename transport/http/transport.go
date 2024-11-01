@@ -12,7 +12,6 @@ import (
 
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
-	"github.com/flarexio/identity/user"
 )
 
 func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
@@ -37,18 +36,11 @@ func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 
 func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		if id == "" {
+		username := c.Param("user")
+		if username == "" {
 			c.Abort()
 
-			err := errors.New("id not found")
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		userID, err := user.ParseID(id)
-		if err != nil {
-			c.Abort()
+			err := errors.New("user not found")
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -59,7 +51,7 @@ func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		req.UserID = userID
+		req.Username = username
 
 		resp, err := endpoint(c, req)
 		if err != nil {
@@ -103,8 +95,8 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		claims := Claims{
 			RegisteredClaims: jwt.RegisteredClaims{
 				Issuer:    cfg.BaseURL,
-				Subject:   u.ID.String(),
-				Audience:  jwt.ClaimStrings{u.Username},
+				Subject:   u.Username,
+				Audience:  cfg.JWT.Audiences,
 				ExpiresAt: jwt.NewNumericDate(now.Add(cfg.JWT.Timeout)),
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
@@ -129,10 +121,8 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 }
 
 func unauthorized(c *gin.Context, code int, err error) {
-	realm := conf.G().BaseURL
-
 	c.Abort()
-	c.Header("WWW-Authenticate", "Bearer realm="+realm)
+	c.Header("WWW-Authenticate", "Bearer realm="+issuer)
 	c.String(code, err.Error())
 }
 
@@ -178,18 +168,11 @@ func RefreshHandler(c *gin.Context) {
 
 func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		if id == "" {
+		username := c.Param("user")
+		if username == "" {
 			c.Abort()
 
-			err := errors.New("id not found")
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		userID, err := user.ParseID(id)
-		if err != nil {
-			c.Abort()
+			err := errors.New("user not found")
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -200,7 +183,7 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		req.UserID = userID
+		req.Username = username
 
 		resp, err := endpoint(c, req)
 		if err != nil {
@@ -215,23 +198,16 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 
 func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		if id == "" {
+		username := c.Param("user")
+		if username == "" {
 			c.Abort()
 
-			err := errors.New("id not found")
+			err := errors.New("user not found")
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
-		userID, err := user.ParseID(id)
-		if err != nil {
-			c.Abort()
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		resp, err := endpoint(c, userID)
+		resp, err := endpoint(c, username)
 		if err != nil {
 			c.Abort()
 			c.String(http.StatusExpectationFailed, err.Error())

@@ -80,7 +80,7 @@ func (suite *identityTestSuite) TestRegisterAndVerify() {
 		return
 	}
 
-	u, err = suite.svc.OTPVerify("TODO", u.ID)
+	u, err = suite.svc.OTPVerify("TODO", u.Username)
 	if err != nil {
 		suite.Fail(err.Error())
 		return

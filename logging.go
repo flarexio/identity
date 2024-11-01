@@ -28,6 +28,7 @@ type loggingMiddleware struct {
 func (mw *loggingMiddleware) Register(username string, name string, email string) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "register"),
+		zap.String("username", username),
 	)
 
 	u, err := mw.next.Register(username, name, email)
@@ -36,23 +37,23 @@ func (mw *loggingMiddleware) Register(username string, name string, email string
 		return nil, err
 	}
 
-	log.Info("user registered", zap.String("username", u.Username))
+	log.Info("user registered")
 	return u, nil
 }
 
-func (mw *loggingMiddleware) OTPVerify(otp string, id user.UserID) (*user.User, error) {
+func (mw *loggingMiddleware) OTPVerify(otp string, username string) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "otp_verify"),
-		zap.String("user_id", id.String()),
+		zap.String("username", username),
 	)
 
-	u, err := mw.next.OTPVerify(otp, id)
+	u, err := mw.next.OTPVerify(otp, username)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, err
 	}
 
-	log.Info("success verified", zap.String("username", u.Username))
+	log.Info("success verified")
 	return u, nil
 }
 
@@ -75,32 +76,30 @@ func (mw *loggingMiddleware) SignIn(credential string, provider user.SocialProvi
 	return u, nil
 }
 
-func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.SocialProvider, id user.UserID) (*user.User, error) {
+func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "add_social_account"),
 		zap.String("provider", string(provider)),
-		zap.String("user_id", id.String()),
+		zap.String("username", username),
 	)
 
-	u, err := mw.next.AddSocialAccount(credential, provider, id)
+	u, err := mw.next.AddSocialAccount(credential, provider, username)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, err
 	}
 
-	log.Info("user social account added",
-		zap.String("username", u.Username),
-	)
+	log.Info("user social account added")
 	return u, nil
 }
 
-func (mw *loggingMiddleware) RegisterPasskey(id user.UserID) (*protocol.CredentialCreation, error) {
+func (mw *loggingMiddleware) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
 	log := mw.log.With(
 		zap.String("action", "register_passkey"),
-		zap.String("user_id", id.String()),
+		zap.String("username", username),
 	)
 
-	opts, err := mw.next.RegisterPasskey(id)
+	opts, err := mw.next.RegisterPasskey(username)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, err

@@ -83,6 +83,7 @@ type JWT struct {
 		Enabled bool
 		Maximum time.Duration
 	}
+	Audiences []string
 }
 
 func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
@@ -93,6 +94,7 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 			Enabled bool
 			Maximum string
 		}
+		Audiences []string
 	}
 
 	if err := value.Decode(&raw); err != nil {
@@ -128,6 +130,8 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 			cfg.Refresh.Maximum = max
 		}
 	}
+
+	cfg.Audiences = raw.Audiences
 
 	return nil
 }
