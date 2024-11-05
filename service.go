@@ -39,8 +39,8 @@ type EventHandler interface {
 
 type ServiceMiddleware func(Service) Service
 
-func NewService(users user.Repository, passkeysSvc passkeys.Service, cfg conf.Providers) Service {
-	return &service{cfg, users, passkeysSvc}
+func NewService(users user.Repository, passkeys passkeys.Service, cfg conf.Providers) Service {
+	return &service{cfg, users, passkeys}
 }
 
 type service struct {

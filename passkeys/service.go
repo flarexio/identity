@@ -22,7 +22,7 @@ type PasskeyService interface {
 	RegistrationService
 	LoginService
 	// CredentialServie
-	// TransactionService
+	TransactionService
 }
 
 type RegistrationService interface {
@@ -188,4 +188,50 @@ func (svc *service) VerifyToken(token string) (*jwt.Token, error) {
 		jwt.WithAudience(svc.cfg.Audience),
 		jwt.WithExpirationRequired(),
 	)
+}
+
+func (svc *service) InitializeTransaction(req *InitializeTransactionRequest) (*protocol.CredentialAssertion, string, error) {
+	var (
+		successResult *protocol.CredentialAssertion
+		failureResult *FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(req).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/transaction/initialize")
+
+	if err != nil {
+		return nil, "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, "", failureResult
+	}
+
+	return successResult, "optional", nil
+}
+
+func (svc *service) FinalizeTransaction(req *protocol.ParsedCredentialAssertionData) (string, error) {
+	var (
+		successResult *TokenResult
+		failureResult *FailureResult
+	)
+
+	resp, err := svc.client.R().
+		SetBody(&req.Raw).
+		SetResult(&successResult).
+		SetError(&failureResult).
+		Post("/transaction/finalize")
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return "", failureResult
+	}
+
+	return successResult.Token, nil
 }
