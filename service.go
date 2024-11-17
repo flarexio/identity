@@ -28,6 +28,7 @@ type Service interface {
 	SignIn(credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
+	User(username string) (*user.User, error)
 	Handler() (EventHandler, error)
 }
 
@@ -211,6 +212,10 @@ func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreati
 	userID := uuid.New()
 
 	return svc.passkeys.InitializeRegistration(userID.String(), u.Username)
+}
+
+func (svc *service) User(username string) (*user.User, error) {
+	return svc.users.FindByUsername(username)
 }
 
 func (svc *service) Handler() (EventHandler, error) {

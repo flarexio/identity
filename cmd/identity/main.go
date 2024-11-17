@@ -148,6 +148,7 @@ func run(cli *cli.Context) error {
 		SignIn:           identity.SignInEndpoint(svc),
 		OTPVerify:        identity.OTPVerifyEndpoint(svc),
 		AddSocialAccount: identity.AddSocialAccountEndpoint(svc),
+		User:             identity.UserEndpoint(svc),
 		RegisterPasskey:  identity.RegisterPasskeyEndpoint(svc),
 	}
 
@@ -271,14 +272,16 @@ func run(cli *cli.Context) error {
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.RegisterPasskeyHandler(endpoints.RegisterPasskey))
 
+		// GET /token/user
+		apiV1.GET("/token/user", transHTTP.UserHandler(endpoints.User))
+
 		// PATCH /token/refresh
 		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
 
 		// POST /passkeys/registration
 		{
 			endpoint := passkeys.FinalizeRegistrationEndpoint(passkeysSvc)
-			apiV1.POST("/passkeys/registration",
-				passkeys.FinalizeRegistrationHandler(endpoint))
+			apiV1.POST("/passkeys/registration", passkeys.FinalizeRegistrationHandler(endpoint))
 		}
 	}
 

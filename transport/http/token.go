@@ -35,11 +35,11 @@ func ParseToken(ctx *gin.Context, claims jwt.Claims) error {
 	}
 
 	tokenStr := ctx.GetHeader("Authorization")
-	if !strings.HasPrefix(tokenStr, "Bearer ") {
+
+	tokenStr, ok := strings.CutPrefix(tokenStr, "Bearer ")
+	if !ok {
 		return ErrInvalidToken
 	}
-
-	tokenStr = strings.TrimPrefix(tokenStr, "Bearer ")
 
 	_, err := jwt.ParseWithClaims(tokenStr, claims, keyFn,
 		jwt.WithAudience(audience),

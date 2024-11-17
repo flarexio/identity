@@ -93,6 +93,22 @@ func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.S
 	return u, nil
 }
 
+func (mw *loggingMiddleware) User(username string) (*user.User, error) {
+	log := mw.log.With(
+		zap.String("action", "user"),
+		zap.String("username", username),
+	)
+
+	u, err := mw.next.User(username)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, err
+	}
+
+	log.Info("user found")
+	return u, nil
+}
+
 func (mw *loggingMiddleware) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
 	log := mw.log.With(
 		zap.String("action", "register_passkey"),

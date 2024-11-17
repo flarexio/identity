@@ -16,6 +16,7 @@ type EndpointSet struct {
 	OTPVerify        endpoint.Endpoint
 	AddSocialAccount endpoint.Endpoint
 	RegisterPasskey  endpoint.Endpoint
+	User             endpoint.Endpoint
 }
 
 type RegisterRequest struct {
@@ -131,6 +132,22 @@ func RegisterPasskeyEndpoint(svc Service) endpoint.Endpoint {
 		}
 
 		return opts, nil
+	}
+}
+
+func UserEndpoint(svc Service) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (response any, err error) {
+		username, ok := request.(string)
+		if !ok {
+			return nil, errors.New("invalid request")
+		}
+
+		u, err := svc.User(username)
+		if err != nil {
+			return nil, err
+		}
+
+		return u, nil
 	}
 }
 

@@ -217,3 +217,22 @@ func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		c.JSON(http.StatusOK, &resp)
 	}
 }
+
+func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var claims Claims
+		if err := ParseToken(c, &claims); err != nil {
+			unauthorized(c, http.StatusUnauthorized, err)
+			return
+		}
+
+		resp, err := endpoint(c, claims.Subject)
+		if err != nil {
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, &resp)
+	}
+}
