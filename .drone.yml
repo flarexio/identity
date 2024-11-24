@@ -74,13 +74,48 @@ steps:
     password: 
       from_secret: REGISTRY_PASSWORD
 
+# ---
+# kind: pipeline
+# type: docker
+# name: release-linux-arm64
+
+# platform:
+#   arch: arm64
+#   os: linux
+
+# trigger:
+#   event:
+#   - tag
+
+# steps:
+# - name: build
+#   image: golang:1.23-alpine
+#   commands:
+#   - apk add gcc musl-dev
+#   - go build -ldflags "-X main.Version=${DRONE_TAG}
+#                        -X main.BuildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+#                        -X main.GitCommit=${DRONE_COMMIT}" 
+#              -o release/linux/arm64/identity cmd/identity/main.go
+
+# - name: publish
+#   image: plugins/docker
+#   settings:
+#     dockerfile: build/Dockerfile.linux.arm64
+#     repo: flarexio/identity
+#     auto_tag: true
+#     auto_tag_suffix: linux-arm64
+#     username:
+#       from_secret: REGISTRY_USERNAME
+#     password: 
+#       from_secret: REGISTRY_PASSWORD
+
 ---
 kind: pipeline
 type: docker
-name: release-linux-arm64
+name: release-manifest
 
 platform:
-  arch: arm64
+  arch: amd64
   os: linux
 
 trigger:
@@ -88,23 +123,17 @@ trigger:
   - tag
 
 steps:
-- name: build
-  image: golang:1.23-alpine
-  commands:
-  - apk add gcc musl-dev
-  - go build -ldflags "-X main.Version=${DRONE_TAG}
-                       -X main.BuildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-                       -X main.GitCommit=${DRONE_COMMIT}" 
-             -o release/linux/arm64/identity cmd/identity/main.go
-
 - name: publish
-  image: plugins/docker
+  image: plugins/manifest
   settings:
-    dockerfile: build/Dockerfile.linux.arm64
-    repo: flarexio/identity
     auto_tag: true
-    auto_tag_suffix: linux-arm64
+    ignore_missing: true
+    spec: build/manifest.txt
     username:
       from_secret: REGISTRY_USERNAME
     password: 
       from_secret: REGISTRY_PASSWORD
+
+depends_on:
+  - release-linux-amd64
+  # - release-linux-arm64
