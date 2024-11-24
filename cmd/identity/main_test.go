@@ -56,6 +56,8 @@ func (suite *identityTestSuite) TestRegister() {
 		return
 	}
 
+	u.Register()
+
 	suite.Equal("user01", u.Username)
 	suite.Equal("user01@example.com", u.Email)
 	suite.Equal(user.Registered, u.Status)
@@ -69,6 +71,8 @@ func (suite *identityTestSuite) TestRegisterAndVerify() {
 		suite.Fail(err.Error())
 		return
 	}
+
+	u.Register()
 
 	suite.Equal("user02", u.Username)
 	suite.Equal("user02@example.com", u.Email)

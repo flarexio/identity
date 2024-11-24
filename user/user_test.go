@@ -12,6 +12,8 @@ func TestRegister(t *testing.T) {
 	assert := assert.New(t)
 
 	u := NewUser("user01", "User01", "user01@example.com")
+	u.Register()
+
 	assert.Equal("user01", u.Username)
 	assert.Equal("user01@example.com", u.Email)
 	assert.Equal(Registered, u.Status)
