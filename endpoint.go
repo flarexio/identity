@@ -84,7 +84,7 @@ func SignInEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.SignIn(req.Credential, req.Provider)
+		u, err := svc.SignIn(ctx, req.Credential, req.Provider)
 		if err != nil {
 			return nil, err
 		}

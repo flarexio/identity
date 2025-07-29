@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +27,7 @@ import (
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/policy"
+	"github.com/flarexio/identity/transport/line"
 
 	transHTTP "github.com/flarexio/identity/transport/http"
 	transPubSub "github.com/flarexio/identity/transport/pubsub"
@@ -80,6 +84,18 @@ func main() {
 				Usage:   "Specifies the HTTP service port",
 				Value:   8080,
 				EnvVars: []string{"IDENTITY_HTTP_PORT"},
+			},
+			&cli.BoolFlag{
+				Name:    "mtls-enabled",
+				Usage:   "Enable mTLS service",
+				Value:   false,
+				EnvVars: []string{"IDENTITY_MTLS_ENABLED"},
+			},
+			&cli.IntFlag{
+				Name:    "mtls-port",
+				Usage:   "Specifies the mTLS service port",
+				Value:   8443,
+				EnvVars: []string{"IDENTITY_MTLS_PORT"},
 			},
 			&cli.StringFlag{
 				Name:    "nats",
@@ -236,6 +252,16 @@ func run(cli *cli.Context) error {
 			gin.H{"origins": cfg.Providers.Passkeys.Origins})
 	})
 
+	if provider := cfg.Providers.LINE; provider.Channel.ID != "" {
+		line.SetConfig(provider)
+
+		// GET /auth/line
+		r.GET("/auth/line", line.LoginAuthURLHandler())
+
+		// GET /auth/line/callback
+		r.GET("/auth/line/callback", line.AuthCallback(endpoints.SignIn))
+	}
+
 	transHTTP.Init(
 		cfg.BaseURL,          // issuer
 		cfg.JWT.Audiences[0], // audience
@@ -287,6 +313,43 @@ func run(cli *cli.Context) error {
 
 	go r.Run(":" + strconv.Itoa(conf.Port))
 
+	// Run mTLS server
+	if cli.Bool("mtls-enabled") {
+		r := gin.Default()
+		r.GET("/users/:subject", func(c *gin.Context) {
+			subject := c.Param("subject")
+			if subject == "" {
+				err := errors.New("subject is required")
+				c.String(http.StatusBadRequest, err.Error())
+				c.Error(err)
+				c.Abort()
+				return
+			}
+
+			ctx := c.Request.Context()
+			resp, err := endpoints.User(ctx, subject)
+			if err != nil {
+				c.String(http.StatusExpectationFailed, err.Error())
+				c.Error(err)
+				c.Abort()
+				return
+			}
+
+			c.JSON(http.StatusOK, &resp)
+		})
+
+		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
+
+		certFile := conf.Path + "/certs/server.crt"
+		keyFile := conf.Path + "/certs/server.key"
+		caFile := conf.Path + "/certs/ca.crt"
+
+		if err := runMTLSServer(r, addr, certFile, keyFile, caFile); err != nil {
+			log.Error("failed to start mTLS server", zap.Error(err))
+			return err
+		}
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -294,4 +357,27 @@ func run(cli *cli.Context) error {
 
 	log.Info("shutdown", zap.String("singal", sign.String()))
 	return nil
+}
+
+// 啟動 mTLS 的 Gin server
+func runMTLSServer(router http.Handler, addr, certFile, keyFile, caFile string) error {
+	caCert, err := os.ReadFile(caFile)
+	if err != nil {
+		return err
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	server := &http.Server{
+		Addr:    addr,
+		Handler: router,
+		TLSConfig: &tls.Config{
+			ClientCAs:  caCertPool,
+			ClientAuth: tls.RequireAndVerifyClientCert,
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+
+	return server.ListenAndServeTLS(certFile, keyFile)
 }

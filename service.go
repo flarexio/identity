@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"google.golang.org/api/idtoken"
 
@@ -25,7 +27,7 @@ var (
 type Service interface {
 	Register(username string, name string, email string) (*user.User, error)
 	OTPVerify(otp string, username string) (*user.User, error)
-	SignIn(credential string, provider user.SocialProvider) (*user.User, error)
+	SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	User(username string) (*user.User, error)
@@ -75,24 +77,28 @@ func (svc *service) OTPVerify(otp string, username string) (*user.User, error) {
 	return u, nil
 }
 
-func (svc *service) SignIn(credential string, provider user.SocialProvider) (*user.User, error) {
+func (svc *service) SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error) {
 	switch provider {
 	case user.GOOGLE:
-		return svc.signInWithGoogle(credential)
+		return svc.signInWithGoogle(ctx, credential)
+
+	case user.LINE:
+		return svc.signInWithLINE(ctx, credential)
+
 	case user.PASSKEYS:
 		return svc.signInWithPasskeys(credential)
-	}
 
-	return nil, ErrProviderNotSupported
+	default:
+		return nil, ErrProviderNotSupported
+	}
 }
 
-func (svc *service) signInWithGoogle(token string) (*user.User, error) {
+func (svc *service) signInWithGoogle(ctx context.Context, token string) (*user.User, error) {
 	audience := svc.cfg.Google.Client.ID
 	if audience == "" {
 		return nil, ErrAudienceNotFound
 	}
 
-	ctx := context.Background()
 	payload, err := idtoken.Validate(ctx, token, audience)
 	if err != nil {
 		return nil, err
@@ -128,6 +134,58 @@ func (svc *service) signInWithGoogle(token string) (*user.User, error) {
 		u.Register()
 		u.Activate()
 		u.AddSocialAccount(user.GOOGLE, socialID)
+
+		defer u.Notify()
+	}
+
+	// TODO: check if user exists and update from google
+
+	return u, nil
+}
+
+type LINEClaims struct {
+	jwt.RegisteredClaims
+	Nonce   string `json:"nonce"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+	Email   string `json:"email"`
+}
+
+func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.User, error) {
+	cfg := svc.cfg.LINE
+
+	keyFn := func(t *jwt.Token) (any, error) {
+		secret := []byte(cfg.Channel.Secret)
+		return secret, nil
+	}
+
+	var claims LINEClaims
+	if _, err := jwt.ParseWithClaims(token, &claims, keyFn,
+		jwt.WithIssuer("https://access.line.me"),
+		jwt.WithAudience(cfg.Channel.ID),
+		jwt.WithLeeway(10*time.Second),
+	); err != nil {
+		return nil, err
+	}
+
+	nonce, ok := ctx.Value(user.Nonce).(string)
+	if !ok || (nonce != claims.Nonce) {
+		return nil, errors.New("invalid nonce")
+	}
+
+	socialID := user.SocialID(claims.Subject)
+	u, err := svc.users.FindBySocialID(socialID)
+	if err != nil {
+		if !errors.Is(err, user.ErrUserNotFound) {
+			return nil, err
+		}
+
+		u = user.NewUser(claims.Subject, claims.Name, claims.Email)
+		u.Avatar = claims.Picture
+
+		u.Register()
+		u.Activate()
+		u.AddSocialAccount(user.LINE, socialID)
 
 		defer u.Notify()
 	}

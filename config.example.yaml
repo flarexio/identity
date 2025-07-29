@@ -41,6 +41,11 @@ providers:
     client: 
       id: google_client_id
       secret: google_client_secret
+  line:
+    channel:
+      id: line_login_channel_id
+      secret: line_login_channel_secret
+    redirectURI: https://identity.flarex.io/auth/line/callback
   passkeys:
     baseURL: https://passkeys.hanko.io
     tenantID: 00000000-0000-0000-0000-000000000000

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -103,7 +104,8 @@ func (suite *identityTestSuite) TestSignInWithGoogle() {
 		return
 	}
 
-	u, err := suite.svc.SignIn(token, user.GOOGLE)
+	ctx := context.Background()
+	u, err := suite.svc.SignIn(ctx, token, user.GOOGLE)
 	if err != nil {
 		suite.Error(err)
 		suite.T().Skip()
@@ -127,7 +129,8 @@ func (suite *identityTestSuite) TestSignInWithPasskeys() {
 		return
 	}
 
-	_, err := suite.svc.SignIn(token, user.PASSKEYS)
+	ctx := context.Background()
+	_, err := suite.svc.SignIn(ctx, token, user.PASSKEYS)
 	if err != nil {
 		suite.Fail(err.Error())
 		return

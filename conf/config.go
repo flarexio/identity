@@ -266,11 +266,17 @@ func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 
 type Providers struct {
 	Google   GoogleProvider   `yaml:"google"`
+	LINE     LineProvider     `yaml:"line"`
 	Passkeys PasskeysProvider `yaml:"passkeys"`
 }
 
 type GoogleProvider struct {
 	Client OAuthAPI `yaml:"client"`
+}
+
+type LineProvider struct {
+	Channel     OAuthAPI `yaml:"channel"`
+	RedirectURI string   `yaml:"redirectURI"`
 }
 
 type PasskeysProvider struct {

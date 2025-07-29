@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -57,13 +59,13 @@ func (mw *loggingMiddleware) OTPVerify(otp string, username string) (*user.User,
 	return u, nil
 }
 
-func (mw *loggingMiddleware) SignIn(credential string, provider user.SocialProvider) (*user.User, error) {
+func (mw *loggingMiddleware) SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "signin"),
 		zap.String("provider", string(provider)),
 	)
 
-	u, err := mw.next.SignIn(credential, provider)
+	u, err := mw.next.SignIn(ctx, credential, provider)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, err
