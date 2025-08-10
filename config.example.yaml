@@ -3,7 +3,7 @@ name: $INSTANCE_NAME
 baseUrl: identity.flarex.io
 
 jwt:
-  privkey: ed25519_private_key_base64
+  privkey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA== # ed25519_private_key_base64
   timeout: 1h
   refresh:
     enabled: true
