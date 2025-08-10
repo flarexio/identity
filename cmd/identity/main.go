@@ -2,14 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -21,12 +23,12 @@ import (
 
 	"github.com/flarexio/core/events"
 	"github.com/flarexio/core/model"
+	"github.com/flarexio/core/policy"
 	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
-	"github.com/flarexio/identity/policy"
 	"github.com/flarexio/identity/transport/line"
 
 	transHTTP "github.com/flarexio/identity/transport/http"
@@ -61,6 +63,25 @@ var versionCmd = &cli.Command{
 	},
 }
 
+var genkeyCmd = &cli.Command{
+	Name:  "genkey",
+	Usage: "Generate a new ed25519 key pair",
+	Action: func(ctx *cli.Context) error {
+		pub, priv, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			return fmt.Errorf("failed to generate key pair: %w", err)
+		}
+
+		basedPriv := base64.StdEncoding.EncodeToString(priv)
+		basedPub := base64.StdEncoding.EncodeToString(pub)
+
+		fmt.Printf("Public Key: %s\n", basedPub)
+		fmt.Printf("Private Key: %s\n", basedPriv)
+
+		return nil
+	},
+}
+
 func main() {
 	cli.VersionPrinter = func(cli *cli.Context) {
 		fmt.Println("Version: " + cli.App.Version)
@@ -72,7 +93,7 @@ func main() {
 		Name:     "identity",
 		Usage:    "Scalable and decentralized user identity management",
 		Version:  Version,
-		Commands: []*cli.Command{versionCmd},
+		Commands: []*cli.Command{versionCmd, genkeyCmd},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "path",
@@ -246,10 +267,12 @@ func run(cli *cli.Context) error {
 	// Add HTTP Transport
 	r := gin.Default()
 
+	// GET /.well-known/jwks.json
+	r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
+
 	// GET /.well-known/webauthn
 	r.GET("/.well-known/webauthn", func(c *gin.Context) {
-		c.JSON(http.StatusOK,
-			gin.H{"origins": cfg.Providers.Passkeys.Origins})
+		c.JSON(http.StatusOK, gin.H{"origins": cfg.Providers.Passkeys.Origins})
 	})
 
 	if provider := cfg.Providers.LINE; provider.Channel.ID != "" {
@@ -265,10 +288,11 @@ func run(cli *cli.Context) error {
 	transHTTP.Init(
 		cfg.BaseURL,          // issuer
 		cfg.JWT.Audiences[0], // audience
-		cfg.JWT.Secret,       // secret
+		cfg.JWT.Privkey,      // ed25519 private key
 	)
 
-	policy, err := policy.NewRegoPolicy(ctx, conf.Path)
+	permissionsPath := filepath.Join(conf.Path, "permissions.json")
+	policy, err := policy.NewRegoPolicy(ctx, permissionsPath)
 	if err != nil {
 		return err
 	}
@@ -316,27 +340,8 @@ func run(cli *cli.Context) error {
 	// Run mTLS server
 	if cli.Bool("mtls-enabled") {
 		r := gin.Default()
-		r.GET("/users/:subject", func(c *gin.Context) {
-			subject := c.Param("subject")
-			if subject == "" {
-				err := errors.New("subject is required")
-				c.String(http.StatusBadRequest, err.Error())
-				c.Error(err)
-				c.Abort()
-				return
-			}
-
-			ctx := c.Request.Context()
-			resp, err := endpoints.User(ctx, subject)
-			if err != nil {
-				c.String(http.StatusExpectationFailed, err.Error())
-				c.Error(err)
-				c.Abort()
-				return
-			}
-
-			c.JSON(http.StatusOK, &resp)
-		})
+		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
+		r.GET("/users/:subject", transHTTP.DirectUserHandler(endpoints.User))
 
 		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
 

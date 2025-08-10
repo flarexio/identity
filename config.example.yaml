@@ -3,7 +3,7 @@ name: $INSTANCE_NAME
 baseUrl: identity.flarex.io
 
 jwt:
-  secret: jwt_secret_key # todo: change to ed25519
+  privkey: ed25519_private_key_base64
   timeout: 1h
   refresh:
     enabled: true
@@ -11,6 +11,7 @@ jwt:
   audiences:
   - identity.flarex.io
   - wallet.flarex.io
+  - talkix.flarex.io
 
 persistence:
   driver: badger

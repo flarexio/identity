@@ -12,6 +12,7 @@ import (
 
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/user"
 )
 
 func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
@@ -104,8 +105,8 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			Roles: []string{"user"},
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		tokenStr, err := token.SignedString(cfg.JWT.Secret)
+		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		tokenStr, err := token.SignedString(cfg.JWT.Privkey)
 		if err != nil {
 			unauthorized(c, http.StatusExpectationFailed, err)
 			return
@@ -151,8 +152,8 @@ func RefreshHandler(c *gin.Context) {
 	claims.IssuedAt = jwt.NewNumericDate(now)
 	claims.ID = ulid.Make().String()
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString(cfg.JWT.Secret)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tokenStr, err := token.SignedString(cfg.JWT.Privkey)
 	if err != nil {
 		unauthorized(c, http.StatusExpectationFailed, err)
 		return
@@ -234,5 +235,64 @@ func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, &resp)
+	}
+}
+
+func DirectUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		subject := c.Param("subject")
+		if subject == "" {
+			c.Abort()
+			c.String(http.StatusBadRequest, "subject not found")
+			return
+		}
+
+		resp, err := endpoint(c, subject)
+		if err != nil {
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		u, ok := resp.(*user.User)
+		if !ok {
+			err := errors.New("invalid user response")
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		cfg := conf.G()
+		now := time.Now()
+
+		claims := Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    cfg.BaseURL,
+				Subject:   u.Username,
+				Audience:  cfg.JWT.Audiences,
+				ExpiresAt: jwt.NewNumericDate(now.Add(cfg.JWT.Timeout)),
+				IssuedAt:  jwt.NewNumericDate(now),
+				ID:        ulid.Make().String(),
+			},
+			Roles: []string{"user"},
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		tokenStr, err := token.SignedString(cfg.JWT.Privkey)
+		if err != nil {
+			c.Abort()
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		response := &identity.SignInResponse{
+			User: u,
+			Token: &identity.Token{
+				Token:     tokenStr,
+				ExpiredAt: now.Add(cfg.JWT.Timeout),
+			},
+		}
+
+		c.JSON(http.StatusOK, &response)
 	}
 }

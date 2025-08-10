@@ -1,6 +1,8 @@
 package conf
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"os"
 	"time"
@@ -77,7 +79,7 @@ type Config struct {
 }
 
 type JWT struct {
-	Secret  []byte
+	Privkey ed25519.PrivateKey
 	Timeout time.Duration
 	Refresh struct {
 		Enabled bool
@@ -88,7 +90,7 @@ type JWT struct {
 
 func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
-		Secret  string
+		Privkey string
 		Timeout string
 		Refresh struct {
 			Enabled bool
@@ -101,7 +103,16 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
-	cfg.Secret = []byte(raw.Secret)
+	priv, err := base64.StdEncoding.DecodeString(raw.Privkey)
+	if err != nil {
+		return err
+	}
+
+	if len(priv) != ed25519.PrivateKeySize {
+		return errors.New("invalid ed25519 private key length")
+	}
+
+	cfg.Privkey = ed25519.PrivateKey(priv)
 
 	if raw.Timeout == "" {
 		cfg.Timeout = 1 * time.Hour

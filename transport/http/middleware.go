@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/flarexio/identity/policy"
+	"github.com/flarexio/core/policy"
 )
 
 type Claims struct {
@@ -64,7 +64,8 @@ func Authorizator(policy policy.Policy) GinAuth {
 				input["object"] = username
 			}
 
-			allowed, err := policy.Eval(c, input)
+			ctx := c.Request.Context()
+			allowed, err := policy.Eval(ctx, input)
 			if err != nil {
 				unauthorized(c, http.StatusExpectationFailed, err)
 				return
