@@ -349,10 +349,7 @@ func run(cli *cli.Context) error {
 		keyFile := conf.Path + "/certs/server.key"
 		caFile := conf.Path + "/certs/ca.crt"
 
-		if err := runMTLSServer(r, addr, certFile, keyFile, caFile); err != nil {
-			log.Error("failed to start mTLS server", zap.Error(err))
-			return err
-		}
+		go runMTLSServer(r, addr, certFile, keyFile, caFile)
 	}
 
 	quit := make(chan os.Signal, 1)

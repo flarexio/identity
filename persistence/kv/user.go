@@ -66,6 +66,40 @@ func (repo *userRepository) Store(u *user.User) error {
 	})
 }
 
+func (repo *userRepository) ListAll() ([]*user.User, error) {
+	var users []*user.User
+
+	if err := repo.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		prefix := []byte("username:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				var u *user.User
+				if err := json.Unmarshal(val, &u); err != nil {
+					return err
+				}
+
+				u.EventStore = events.NewEventStore()
+				users = append(users, u)
+				return nil
+			})
+
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}
+
 func (repo *userRepository) Find(id user.UserID) (*user.User, error) {
 	return repo.find(id.Bytes())
 }

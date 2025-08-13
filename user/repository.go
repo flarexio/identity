@@ -7,6 +7,7 @@ type Repository interface {
 
 	// Query
 
+	ListAll() ([]*User, error)
 	Find(id UserID) (*User, error)
 	FindByUsername(username string) (*User, error)
 	FindBySocialID(socialID SocialID) (*User, error)

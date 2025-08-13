@@ -45,6 +45,27 @@ func (repo *userRepository) Store(u *user.User) error {
 	return nil
 }
 
+func (repo *userRepository) ListAll() ([]*user.User, error) {
+	var users []*User
+
+	result := repo.db.
+		Preload("Accounts").
+		Joins("LEFT JOIN social_accounts ON social_accounts.user_id = users.id").
+		Find(&users, "social_accounts.deleted_at IS NULL")
+
+	err := result.Error
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]*user.User, 0)
+	for _, u := range users {
+		results = append(results, u.reconstitute())
+	}
+
+	return results, nil
+}
+
 func (repo *userRepository) Find(id user.UserID) (*user.User, error) {
 	var u *User
 

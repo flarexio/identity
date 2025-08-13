@@ -42,6 +42,19 @@ func (repo *userRepository) Store(u *user.User) error {
 	return nil
 }
 
+func (repo *userRepository) ListAll() ([]*user.User, error) {
+	repo.RLock()
+	defer repo.RUnlock()
+
+	users := make([]*user.User, 0)
+	for _, u := range repo.users {
+		u.EventStore = events.NewEventStore()
+		users = append(users, u)
+	}
+
+	return users, nil
+}
+
 func (repo *userRepository) Find(id user.UserID) (*user.User, error) {
 	repo.RLock()
 	defer repo.RUnlock()
