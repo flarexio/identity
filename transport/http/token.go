@@ -30,8 +30,9 @@ func Init(i, a string, privkey ed25519.PrivateKey) {
 	issuer = i
 	audience = a
 
+	pubkey := privkey.Public().(ed25519.PublicKey)
 	keyFn = func(t *jwt.Token) (any, error) {
-		return privkey, nil
+		return pubkey, nil
 	}
 }
 
