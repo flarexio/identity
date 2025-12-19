@@ -1,5 +1,11 @@
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache git gcc musl-dev
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=1 go build -o /identity cmd/identity/main.go
+
 FROM alpine:3.22
+COPY --from=builder /identity /bin/identity
+COPY --from=builder /src/config.example.yaml /root/.identity/
 EXPOSE 8080
-ADD release/linux/amd64/identity /bin/
-ADD config.example.yaml /root/.identity/
-ENTRYPOINT ["/bin/identity"] 
+ENTRYPOINT ["/bin/identity"]

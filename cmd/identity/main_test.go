@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/flarexio/core/events"
+	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/passkeys"
@@ -15,7 +18,8 @@ import (
 
 type identityTestSuite struct {
 	suite.Suite
-	cfg   conf.Config
+	cfg   *conf.Config
+	ps    pubsub.PubSub
 	svc   identity.Service
 	users user.Repository
 }
@@ -23,6 +27,10 @@ type identityTestSuite struct {
 func (suite *identityTestSuite) SetupSuite() {
 	conf.Path = "../.."
 	conf.Port = 8080
+
+	ps := pubsub.NewSimplePubSub()
+
+	events.ReplaceGlobals(ps)
 
 	cfg, err := conf.LoadConfig()
 	if err != nil {
@@ -46,6 +54,8 @@ func (suite *identityTestSuite) SetupSuite() {
 
 	svc := identity.NewService(users, passkeysSvc, cfg.Providers)
 
+	suite.cfg = cfg
+	suite.ps = ps
 	suite.svc = svc
 	suite.users = users
 }
@@ -85,6 +95,15 @@ func (suite *identityTestSuite) TestRegisterAndVerify() {
 		return
 	}
 
+	eventReceived := make(chan *pubsub.Message, 1)
+	if err := suite.ps.Subscribe("users.#.activated", func(ctx context.Context, msg *pubsub.Message) error {
+		eventReceived <- msg
+		return nil
+	}); err != nil {
+		suite.Fail(err.Error())
+		return
+	}
+
 	u, err = suite.svc.OTPVerify("TODO", u.Username)
 	if err != nil {
 		suite.Fail(err.Error())
@@ -94,13 +113,28 @@ func (suite *identityTestSuite) TestRegisterAndVerify() {
 	suite.Equal("user02", u.Username)
 	suite.Equal("user02@example.com", u.Email)
 	suite.Equal(user.Activated, u.Status)
-	suite.Equal(user.UserActivated.String(), u.Events()[0].EventName())
+
+	select {
+	case msg := <-eventReceived:
+		suite.Contains(msg.Topic, "users."+u.ID.String()+".activated")
+	case <-time.After(5 * time.Second):
+		suite.Fail("expected user.activated event")
+	}
 }
 
 func (suite *identityTestSuite) TestSignInWithGoogle() {
 	token := suite.cfg.Test.Tokens.Google
-	if token == "" {
+	if token == "YOUR_GOOGLE_JWT_TOKEN" {
 		suite.T().Skip()
+		return
+	}
+
+	eventReceived := make(chan *pubsub.Message, 1)
+	if err := suite.ps.Subscribe("users.#.#", func(ctx context.Context, msg *pubsub.Message) error {
+		eventReceived <- msg
+		return nil
+	}); err != nil {
+		suite.Fail(err.Error())
 		return
 	}
 
@@ -118,13 +152,27 @@ func (suite *identityTestSuite) TestSignInWithGoogle() {
 	suite.Equal(user.Activated, u.Status)
 	suite.Equal(sid, u.Accounts[0].SocialID)
 
-	suite.Equal(user.UserRegistered.String(), u.Events()[0].EventName())
-	suite.Equal(user.UserSocialAccountAdded.String(), u.Events()[1].EventName())
+	receivedTopics := make([]string, 3)
+	timeout := time.After(5 * time.Second)
+
+	for i := 0; i < 3; i++ {
+		select {
+		case msg := <-eventReceived:
+			receivedTopics[i] = msg.Topic
+		case <-timeout:
+			suite.Fail("expected user events")
+			return
+		}
+	}
+
+	suite.Contains(receivedTopics[0], "users."+u.ID.String()+".registered")
+	suite.Contains(receivedTopics[1], "users."+u.ID.String()+".activated")
+	suite.Contains(receivedTopics[2], "users."+u.ID.String()+".social_account_added")
 }
 
 func (suite *identityTestSuite) TestSignInWithPasskeys() {
 	token := suite.cfg.Test.Tokens.Passkeys
-	if token == "" {
+	if token == "YOUR_PASSKEYS_JWT_TOKEN" {
 		suite.T().Skip()
 		return
 	}

@@ -5,7 +5,7 @@ go 1.24.5
 require (
 	github.com/MicahParks/keyfunc/v3 v3.6.1
 	github.com/dgraph-io/badger/v4 v4.8.0
-	github.com/flarexio/core v1.0.5
+	github.com/flarexio/core v1.0.6
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-kit/kit v0.13.0
 	github.com/go-resty/resty/v2 v2.16.5
