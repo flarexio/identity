@@ -27,7 +27,7 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Build and Push Backend Image
+      - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -58,7 +58,7 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Create and Push Backend Manifests
+      - name: Create and Push Manifests
         run: |
           for TAG in ${{ steps.version.outputs.full }} ${{ steps.version.outputs.minor }} ${{ steps.version.outputs.major }}; do
             docker manifest create flarexio/identity:$TAG \

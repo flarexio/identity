@@ -1,4 +1,4 @@
-# Identity [![Build Status](https://drone.flarex.io/api/badges/flarexio/identity/status.svg?ref=refs/heads/main)](https://drone.flarex.io/flarexio/identity)
+# Identity [![Build](https://github.com/flarexio/identity/actions/workflows/build.yml/badge.svg)](https://github.com/flarexio/identity/actions/workflows/build.yml)
 
 Identity is a scalable and decentralized microservice for user identity management.
 
