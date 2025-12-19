@@ -31,6 +31,7 @@ type Service interface {
 	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	User(username string) (*user.User, error)
+	UserBySocialID(socialID user.SocialID) (*user.User, error)
 	Handler() (EventHandler, error)
 }
 
@@ -53,9 +54,14 @@ type service struct {
 }
 
 func (svc *service) Register(username string, name string, email string) (*user.User, error) {
+	// Ensure username is unique
 	_, err := svc.users.FindByUsername(username)
 	if err == nil {
 		return nil, errors.New("user exists")
+	}
+
+	if !errors.Is(err, user.ErrUserNotFound) {
+		return nil, err
 	}
 
 	u := user.NewUser(username, name, email)
@@ -105,6 +111,7 @@ func (svc *service) signInWithGoogle(ctx context.Context, token string) (*user.U
 	}
 
 	socialID := user.SocialID(payload.Subject)
+
 	u, err := svc.users.FindBySocialID(socialID)
 	if err != nil {
 		if !errors.Is(err, user.ErrUserNotFound) {
@@ -123,6 +130,14 @@ func (svc *service) signInWithGoogle(ctx context.Context, token string) (*user.U
 		}
 
 		username := strings.Split(email, "@")[0]
+
+		// Ensure username is unique
+		_, err := svc.users.FindByUsername(username)
+		if err == nil {
+			username = username + "." + uuid.NewString()[:8]
+		} else if !errors.Is(err, user.ErrUserNotFound) {
+			return nil, err
+		}
 
 		u = user.NewUser(username, name, email)
 
@@ -154,6 +169,11 @@ type LINEClaims struct {
 func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.User, error) {
 	cfg := svc.cfg.LINE
 
+	audience := cfg.Channel.ID
+	if audience == "" {
+		return nil, ErrAudienceNotFound
+	}
+
 	keyFn := func(t *jwt.Token) (any, error) {
 		secret := []byte(cfg.Channel.Secret)
 		return secret, nil
@@ -162,7 +182,7 @@ func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.Use
 	var claims LINEClaims
 	if _, err := jwt.ParseWithClaims(token, &claims, keyFn,
 		jwt.WithIssuer("https://access.line.me"),
-		jwt.WithAudience(cfg.Channel.ID),
+		jwt.WithAudience(audience),
 		jwt.WithLeeway(10*time.Second),
 	); err != nil {
 		return nil, err
@@ -174,13 +194,24 @@ func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.Use
 	}
 
 	socialID := user.SocialID(claims.Subject)
+
 	u, err := svc.users.FindBySocialID(socialID)
 	if err != nil {
 		if !errors.Is(err, user.ErrUserNotFound) {
 			return nil, err
 		}
 
-		u = user.NewUser(claims.Subject, claims.Name, claims.Email)
+		username := strings.Split(claims.Email, "@")[0]
+
+		// Ensure username is unique
+		_, err := svc.users.FindByUsername(username)
+		if err == nil {
+			username = username + "." + uuid.NewString()[:8]
+		} else if !errors.Is(err, user.ErrUserNotFound) {
+			return nil, err
+		}
+
+		u = user.NewUser(username, claims.Name, claims.Email)
 		u.Avatar = claims.Picture
 
 		u.Register()
@@ -189,8 +220,6 @@ func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.Use
 
 		defer u.Notify()
 	}
-
-	// TODO: check if user exists and update from google
 
 	return u, nil
 }
@@ -231,6 +260,30 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 		}
 
 		subject = payload.Subject
+
+	case user.LINE:
+		cfg := svc.cfg.LINE
+
+		audience := cfg.Channel.ID
+		if audience == "" {
+			return nil, ErrAudienceNotFound
+		}
+
+		keyFn := func(t *jwt.Token) (any, error) {
+			secret := []byte(cfg.Channel.Secret)
+			return secret, nil
+		}
+
+		var claims LINEClaims
+		if _, err := jwt.ParseWithClaims(credential, &claims, keyFn,
+			jwt.WithIssuer("https://access.line.me"),
+			jwt.WithAudience(audience),
+			jwt.WithLeeway(10*time.Second),
+		); err != nil {
+			return nil, err
+		}
+
+		subject = claims.Subject
 
 	case user.PASSKEYS:
 		token, err := svc.passkeys.VerifyToken(credential)
@@ -274,6 +327,10 @@ func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreati
 
 func (svc *service) User(username string) (*user.User, error) {
 	return svc.users.FindByUsername(username)
+}
+
+func (svc *service) UserBySocialID(socialID user.SocialID) (*user.User, error) {
+	return svc.users.FindBySocialID(socialID)
 }
 
 func (svc *service) Handler() (EventHandler, error) {

@@ -20,6 +20,7 @@ func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		var req identity.RegisterRequest
 		if err := c.ShouldBind(&req); err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -27,6 +28,7 @@ func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, req)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -39,9 +41,9 @@ func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			c.Abort()
-
 			err := errors.New("user not found")
+			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -49,6 +51,7 @@ func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		var req identity.OTPVerifyRequest
 		if err := c.ShouldBind(&req); err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -57,6 +60,7 @@ func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, req)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -71,6 +75,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		err := c.ShouldBind(&req)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -78,6 +83,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, req)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -123,6 +129,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 
 func unauthorized(c *gin.Context, code int, err error) {
 	c.Abort()
+	c.Error(err)
 	c.Header("WWW-Authenticate", "Bearer realm="+issuer)
 	c.String(code, err.Error())
 }
@@ -130,8 +137,10 @@ func unauthorized(c *gin.Context, code int, err error) {
 func RefreshHandler(c *gin.Context) {
 	cfg := conf.G()
 	if !cfg.JWT.Refresh.Enabled {
+		err := errors.New("token refresh disabled")
 		c.Abort()
-		c.String(http.StatusForbidden, "token refresh disabled")
+		c.Error(err)
+		c.String(http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -171,9 +180,9 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			c.Abort()
-
 			err := errors.New("user not found")
+			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -181,6 +190,7 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		var req identity.AddSocialAccountRequest
 		if err := c.ShouldBind(&req); err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -189,6 +199,7 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, req)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -201,9 +212,9 @@ func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			c.Abort()
-
 			err := errors.New("user not found")
+			c.Abort()
+			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -211,6 +222,7 @@ func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, username)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -230,6 +242,7 @@ func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		resp, err := endpoint(c, claims.Subject)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -238,18 +251,23 @@ func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
-func DirectUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subject := c.Param("subject")
 		if subject == "" {
+			err := errors.New("subject not found")
 			c.Abort()
-			c.String(http.StatusBadRequest, "subject not found")
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
-		resp, err := endpoint(c, subject)
+		socialID := user.SocialID(subject)
+
+		resp, err := endpoint(c, socialID)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -258,6 +276,7 @@ func DirectUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		if !ok {
 			err := errors.New("invalid user response")
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}
@@ -281,6 +300,7 @@ func DirectUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		tokenStr, err := token.SignedString(cfg.JWT.Privkey)
 		if err != nil {
 			c.Abort()
+			c.Error(err)
 			c.String(http.StatusExpectationFailed, err.Error())
 			return
 		}

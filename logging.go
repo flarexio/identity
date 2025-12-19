@@ -3,9 +3,8 @@ package identity
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/go-webauthn/webauthn/protocol"
+	"go.uber.org/zap"
 
 	"github.com/flarexio/identity/user"
 )
@@ -108,6 +107,22 @@ func (mw *loggingMiddleware) User(username string) (*user.User, error) {
 	}
 
 	log.Info("user found")
+	return u, nil
+}
+
+func (mw *loggingMiddleware) UserBySocialID(socialID user.SocialID) (*user.User, error) {
+	log := mw.log.With(
+		zap.String("action", "user_by_social_id"),
+		zap.String("social_id", string(socialID)),
+	)
+
+	u, err := mw.next.UserBySocialID(socialID)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, err
+	}
+
+	log.Info("user found", zap.String("username", u.Username))
 	return u, nil
 }
 

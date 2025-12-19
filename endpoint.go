@@ -17,6 +17,7 @@ type EndpointSet struct {
 	AddSocialAccount endpoint.Endpoint
 	RegisterPasskey  endpoint.Endpoint
 	User             endpoint.Endpoint
+	UserBySocialID   endpoint.Endpoint
 }
 
 type RegisterRequest struct {
@@ -143,6 +144,22 @@ func UserEndpoint(svc Service) endpoint.Endpoint {
 		}
 
 		u, err := svc.User(username)
+		if err != nil {
+			return nil, err
+		}
+
+		return u, nil
+	}
+}
+
+func UserBySocialIDEndpoint(svc Service) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (response any, err error) {
+		socialID, ok := request.(user.SocialID)
+		if !ok {
+			return nil, errors.New("invalid request")
+		}
+
+		u, err := svc.UserBySocialID(socialID)
 		if err != nil {
 			return nil, err
 		}

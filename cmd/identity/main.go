@@ -181,11 +181,12 @@ func run(cli *cli.Context) error {
 
 	// Add Endpoints
 	endpoints := identity.EndpointSet{
-		Register:         identity.RegisterEndpoint(svc),
+		// Register:         identity.RegisterEndpoint(svc),
 		SignIn:           identity.SignInEndpoint(svc),
 		OTPVerify:        identity.OTPVerifyEndpoint(svc),
 		AddSocialAccount: identity.AddSocialAccountEndpoint(svc),
 		User:             identity.UserEndpoint(svc),
+		UserBySocialID:   identity.UserBySocialIDEndpoint(svc),
 		RegisterPasskey:  identity.RegisterPasskeyEndpoint(svc),
 	}
 
@@ -305,7 +306,7 @@ func run(cli *cli.Context) error {
 		apiV1.PATCH("/signin", transHTTP.SignInHandler(endpoints.SignIn))
 
 		// POST /users
-		apiV1.POST("/users", transHTTP.RegisterHandler(endpoints.Register))
+		// apiV1.POST("/users", transHTTP.RegisterHandler(endpoints.Register))
 
 		// PATCH /users/:user/verify
 		apiV1.POST("/users/:user/verify",
@@ -341,7 +342,7 @@ func run(cli *cli.Context) error {
 	if cli.Bool("mtls-enabled") {
 		r := gin.Default()
 		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
-		r.GET("/users/:subject", transHTTP.DirectUserHandler(endpoints.User))
+		r.GET("/users/:subject", transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
 
 		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
 
