@@ -94,6 +94,22 @@ func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.S
 	return u, nil
 }
 
+func (mw *loggingMiddleware) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
+	log := mw.log.With(
+		zap.String("action", "register_passkey"),
+		zap.String("username", username),
+	)
+
+	opts, err := mw.next.RegisterPasskey(username)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, err
+	}
+
+	log.Info("passkey registered")
+	return opts, nil
+}
+
 func (mw *loggingMiddleware) User(username string) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "user"),
@@ -126,20 +142,20 @@ func (mw *loggingMiddleware) UserBySocialID(socialID user.SocialID) (*user.User,
 	return u, nil
 }
 
-func (mw *loggingMiddleware) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
+func (mw *loggingMiddleware) DeleteUser(username string) error {
 	log := mw.log.With(
-		zap.String("action", "register_passkey"),
+		zap.String("action", "delete_user"),
 		zap.String("username", username),
 	)
 
-	opts, err := mw.next.RegisterPasskey(username)
+	err := mw.next.DeleteUser(username)
 	if err != nil {
 		log.Error(err.Error())
-		return nil, err
+		return err
 	}
 
-	log.Info("passkey registered")
-	return opts, nil
+	log.Info("user deleted")
+	return nil
 }
 
 func (mw *loggingMiddleware) Handler() (EventHandler, error) {
@@ -200,5 +216,24 @@ func (mw *loggingMiddleware) UserSocialAccountAddedHandler(e *user.UserSocialAcc
 	}
 
 	log.Info("social account added")
+	return nil
+}
+
+func (mw *loggingMiddleware) UserDeletedHandler(e *user.UserDeletedEvent) error {
+	log := mw.log.With(
+		zap.String("event", e.EventName()),
+		zap.String("user_id", e.UserID.String()),
+	)
+
+	handler, err := mw.next.Handler()
+	if err != nil {
+		return err
+	}
+
+	if err := handler.UserDeletedHandler(e); err != nil {
+		log.Error(err.Error())
+	}
+
+	log.Info("user deleted")
 	return nil
 }

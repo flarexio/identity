@@ -32,6 +32,7 @@ type Service interface {
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	User(username string) (*user.User, error)
 	UserBySocialID(socialID user.SocialID) (*user.User, error)
+	DeleteUser(username string) error
 	Handler() (EventHandler, error)
 }
 
@@ -39,6 +40,7 @@ type EventHandler interface {
 	UserRegisteredHandler(e *user.UserRegisteredEvent) error
 	UserActivatedHandler(e *user.UserActivatedEvent) error
 	UserSocialAccountAddedHandler(e *user.UserSocialAccountAddedEvent) error
+	UserDeletedHandler(e *user.UserDeletedEvent) error
 }
 
 type ServiceMiddleware func(Service) Service
@@ -333,6 +335,18 @@ func (svc *service) UserBySocialID(socialID user.SocialID) (*user.User, error) {
 	return svc.users.FindBySocialID(socialID)
 }
 
+func (svc *service) DeleteUser(username string) error {
+	u, err := svc.users.FindByUsername(username)
+	if err != nil {
+		return err
+	}
+
+	u.Delete()
+	defer u.Notify()
+
+	return nil
+}
+
 func (svc *service) Handler() (EventHandler, error) {
 	return svc, nil
 }
@@ -363,4 +377,17 @@ func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAdded
 	u.UpdatedAt = e.OccuredAt
 
 	return svc.users.Store(u)
+}
+
+func (svc *service) UserDeletedHandler(e *user.UserDeletedEvent) error {
+	u, err := svc.users.Find(e.UserID)
+	if err != nil {
+		return err
+	}
+
+	u.Status = user.Revoked
+	u.UpdatedAt = e.OccuredAt
+	u.DeletedAt = e.OccuredAt
+
+	return svc.users.Delete(u)
 }

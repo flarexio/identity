@@ -62,6 +62,11 @@ func (suite *userRepositoryTestSuite) TestFindBySocialID() {
 	suite.Equal(sid, user.Accounts[0].SocialID)
 }
 
+func (suite *userRepositoryTestSuite) TearDownSuite() {
+	suite.users.Truncate()
+	suite.users.Close()
+}
+
 func TestUserRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(userRepositoryTestSuite))
 }

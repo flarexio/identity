@@ -11,10 +11,6 @@ import (
 	"github.com/flarexio/identity/user"
 )
 
-type userRepository struct {
-	db *badger.DB
-}
-
 func NewUserRepository(cfg conf.Persistence) (user.Repository, error) {
 	opts := badger.DefaultOptions(cfg.Host + "/" + cfg.Name)
 	if cfg.InMem {
@@ -30,6 +26,10 @@ func NewUserRepository(cfg conf.Persistence) (user.Repository, error) {
 	repo.db = db
 
 	return repo, nil
+}
+
+type userRepository struct {
+	db *badger.DB
 }
 
 func (repo *userRepository) Store(u *user.User) error {
@@ -57,6 +57,29 @@ func (repo *userRepository) Store(u *user.User) error {
 
 		for _, account := range u.Accounts {
 			err := txn.Set([]byte("social:"+account.SocialID), bs)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+func (repo *userRepository) Delete(u *user.User) error {
+	return repo.db.Update(func(txn *badger.Txn) error {
+		err := txn.Delete(u.ID.Bytes())
+		if err != nil {
+			return err
+		}
+
+		err = txn.Delete([]byte("username:" + u.Username))
+		if err != nil {
+			return err
+		}
+
+		for _, account := range u.Accounts {
+			err := txn.Delete([]byte("social:" + account.SocialID))
 			if err != nil {
 				return err
 			}
@@ -141,10 +164,10 @@ func (repo *userRepository) find(key []byte) (*user.User, error) {
 	return u, nil
 }
 
-func (repo *userRepository) DB() *badger.DB {
-	return repo.db
-}
-
 func (repo *userRepository) Close() error {
 	return repo.db.Close()
+}
+
+func (repo *userRepository) Truncate() error {
+	return repo.db.DropAll()
 }

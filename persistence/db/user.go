@@ -10,10 +10,6 @@ import (
 	"github.com/flarexio/identity/user"
 )
 
-type userRepository struct {
-	db *gorm.DB
-}
-
 func NewUserRepository(cfg conf.Persistence) (user.Repository, error) {
 	filename := cfg.Host + "/" + cfg.Name + ".db"
 	if cfg.InMem {
@@ -34,15 +30,27 @@ func NewUserRepository(cfg conf.Persistence) (user.Repository, error) {
 	return repo, nil
 }
 
+type userRepository struct {
+	db *gorm.DB
+}
+
 func (repo *userRepository) Store(u *user.User) error {
 	user := NewUser(u) // convert Domain to Data model
 
 	result := repo.db.Save(user)
+	return result.Error
+}
+
+func (repo *userRepository) Delete(u *user.User) error {
+	user := NewUser(u) // convert Domain to Data model
+
+	result := repo.db.Delete(&SocialAccount{}, "user_id = ?", user.ID)
 	if err := result.Error; err != nil {
 		return err
 	}
 
-	return nil
+	result = repo.db.Delete(user)
+	return result.Error
 }
 
 func (repo *userRepository) ListAll() ([]*user.User, error) {
@@ -132,6 +140,11 @@ func (repo *userRepository) Close() error {
 	return nil
 }
 
-func (repo *userRepository) DB() *gorm.DB {
-	return repo.db
+func (repo *userRepository) Truncate() error {
+	err := repo.db.Exec("DELETE FROM social_accounts").Error
+	if err != nil {
+		return err
+	}
+
+	return repo.db.Exec("DELETE FROM users").Error
 }

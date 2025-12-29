@@ -15,6 +15,7 @@ const (
 	UserRegistered
 	UserActivated
 	UserSocialAccountAdded
+	UserDeleted
 )
 
 func ParseEventName(s string) EventName {
@@ -25,6 +26,8 @@ func ParseEventName(s string) EventName {
 		return UserActivated
 	case "user_social_account_added":
 		return UserSocialAccountAdded
+	case "user_deleted":
+		return UserDeleted
 	default:
 		return Unknown
 	}
@@ -38,6 +41,8 @@ func (name EventName) String() string {
 		return "user_activated"
 	case UserSocialAccountAdded:
 		return "user_social_account_added"
+	case UserDeleted:
+		return "user_deleted"
 	default:
 		return ""
 	}
@@ -116,5 +121,15 @@ func NewUserSocialAccountAddedEvent(u *User, account *SocialAccount) events.Doma
 	return &UserSocialAccountAddedEvent{
 		Event:   NewEvent(UserSocialAccountAdded, u),
 		Account: *account,
+	}
+}
+
+type UserDeletedEvent struct {
+	*Event
+}
+
+func NewUserDeletedEvent(u *User) events.DomainEvent {
+	return &UserDeletedEvent{
+		Event: NewEvent(UserDeleted, u),
 	}
 }

@@ -48,23 +48,46 @@ func generateRandomString(length int) string {
 	return base64.URLEncoding.EncodeToString(bytes)
 }
 
+type SessionOperation string
+
+const (
+	SingIn      SessionOperation = "signin"
+	LinkAccount SessionOperation = "link_account"
+)
+
 type Session struct {
-	State string
-	Nonce string
+	State    string
+	Nonce    string
+	Op       SessionOperation
+	Username string
 }
 
-func NewSession() Session {
-	return Session{
+func NewSession(op string) *Session {
+	return &Session{
 		State: generateRandomString(32),
 		Nonce: generateRandomString(32),
+		Op:    SessionOperation(op),
 	}
 }
 
 func LoginAuthURLHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		session := NewSession()
+		op := c.Query("op")
+		if op == "" {
+			err := errors.New("operation is required")
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 
-		store.Set(session.State, session.Nonce, cache.DefaultExpiration)
+		session := NewSession(op)
+
+		if username := c.Query("username"); username != "" {
+			session.Username = username
+		}
+
+		store.Set(session.State, session, cache.DefaultExpiration)
 
 		authURL := config.AuthCodeURL(session.State,
 			oauth2.SetAuthURLParam("response_type", "code"),
@@ -75,7 +98,7 @@ func LoginAuthURLHandler() gin.HandlerFunc {
 	}
 }
 
-func AuthCallback(endpoint endpoint.Endpoint) gin.HandlerFunc {
+func AuthCallback(signInEndpoint endpoint.Endpoint, addSocialAccountEndpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Query("code")
 		if code == "" {
@@ -95,7 +118,7 @@ func AuthCallback(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		nonce, ok := store.Get(state)
+		s, ok := store.Get(state)
 		if !ok {
 			err := errors.New("invalid state")
 			c.String(http.StatusBadRequest, err.Error())
@@ -105,8 +128,17 @@ func AuthCallback(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		}
 		defer store.Delete(state)
 
+		session, ok := s.(*Session)
+		if !ok {
+			err := errors.New("invalid session data")
+			c.String(http.StatusBadRequest, err.Error())
+			c.Error(err)
+			c.Abort()
+			return
+		}
+
 		ctx := c.Request.Context()
-		ctx = context.WithValue(ctx, user.Nonce, nonce)
+		ctx = context.WithValue(ctx, user.Nonce, session.Nonce)
 
 		token, err := config.Exchange(ctx, code)
 		if err != nil {
@@ -125,18 +157,46 @@ func AuthCallback(endpoint endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		req := identity.SignInRequest{
-			Provider:   user.LINE,
-			Credential: idToken,
-		}
+		switch session.Op {
+		case SingIn:
+			req := identity.SignInRequest{
+				Provider:   user.LINE,
+				Credential: idToken,
+			}
 
-		if _, err := endpoint(ctx, req); err != nil {
-			c.String(http.StatusExpectationFailed, err.Error())
+			_, err := signInEndpoint(ctx, req)
+			if err != nil {
+				c.String(http.StatusExpectationFailed, err.Error())
+				c.Error(err)
+				c.Abort()
+				return
+			}
+
+			c.String(http.StatusOK, "Login successful! You can close this window now.")
+
+		case LinkAccount:
+			req := identity.AddSocialAccountRequest{
+				Provider:   user.LINE,
+				Credential: idToken,
+				Username:   session.Username,
+			}
+
+			_, err := addSocialAccountEndpoint(ctx, req)
+			if err != nil {
+				c.String(http.StatusExpectationFailed, err.Error())
+				c.Error(err)
+				c.Abort()
+				return
+			}
+
+			c.String(http.StatusOK, "Social account linked successfully! You can close this window now.")
+
+		default:
+			err := errors.New("invalid operation")
+			c.String(http.StatusBadRequest, err.Error())
 			c.Error(err)
 			c.Abort()
 			return
 		}
-
-		c.String(http.StatusOK, "Login successful! You can close this window now.")
 	}
 }

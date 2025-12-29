@@ -283,7 +283,8 @@ func run(cli *cli.Context) error {
 		r.GET("/auth/line", line.LoginAuthURLHandler())
 
 		// GET /auth/line/callback
-		r.GET("/auth/line/callback", line.AuthCallback(endpoints.SignIn))
+		r.GET("/auth/line/callback",
+			line.AuthCallback(endpoints.SignIn, endpoints.AddSocialAccount))
 	}
 
 	transHTTP.Init(

@@ -7,19 +7,19 @@ import (
 	"github.com/flarexio/identity/user"
 )
 
-type userRepository struct {
-	users     map[user.UserID]*user.User   // map[UserID]*user.User
-	usernames map[string]*user.User        // map[Username]*user.User
-	socials   map[user.SocialID]*user.User // map[SocialID]*user.User
-	sync.RWMutex
-}
-
 func NewUserRepository() (user.Repository, error) {
 	repo := new(userRepository)
 	repo.users = make(map[user.UserID]*user.User)
 	repo.usernames = make(map[string]*user.User)
 	repo.socials = make(map[user.SocialID]*user.User)
 	return repo, nil
+}
+
+type userRepository struct {
+	users     map[user.UserID]*user.User   // map[UserID]*user.User
+	usernames map[string]*user.User        // map[Username]*user.User
+	socials   map[user.SocialID]*user.User // map[SocialID]*user.User
+	sync.RWMutex
 }
 
 func (repo *userRepository) Store(u *user.User) error {
@@ -39,6 +39,20 @@ func (repo *userRepository) Store(u *user.User) error {
 	}
 
 	repo.Unlock()
+	return nil
+}
+
+func (repo *userRepository) Delete(u *user.User) error {
+	repo.Lock()
+	defer repo.Unlock()
+
+	delete(repo.users, u.ID)
+	delete(repo.usernames, u.Username)
+
+	for _, account := range u.Accounts {
+		delete(repo.socials, account.SocialID)
+	}
+
 	return nil
 }
 
@@ -95,5 +109,15 @@ func (repo *userRepository) FindBySocialID(socialID user.SocialID) (*user.User, 
 }
 
 func (repo *userRepository) Close() error {
+	return nil
+}
+
+func (repo *userRepository) Truncate() error {
+	repo.Lock()
+	defer repo.Unlock()
+
+	repo.users = make(map[user.UserID]*user.User)
+	repo.usernames = make(map[string]*user.User)
+	repo.socials = make(map[user.SocialID]*user.User)
 	return nil
 }

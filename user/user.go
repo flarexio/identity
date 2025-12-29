@@ -176,6 +176,16 @@ func (u *User) Activate() {
 	u.AddEvent(e)
 }
 
+func (u *User) Delete() {
+	now := time.Now()
+	u.Status = Revoked
+	u.UpdatedAt = now
+	u.DeletedAt = now
+
+	e := NewUserDeletedEvent(u)
+	u.AddEvent(e)
+}
+
 func (u *User) AddSocialAccount(provider SocialProvider, socialID SocialID) {
 	account := NewSocialAccount(provider, socialID)
 

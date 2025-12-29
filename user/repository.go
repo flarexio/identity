@@ -4,6 +4,7 @@ type Repository interface {
 	// Command
 
 	Store(u *User) error
+	Delete(u *User) error
 
 	// Query
 
@@ -12,5 +13,9 @@ type Repository interface {
 	FindByUsername(username string) (*User, error)
 	FindBySocialID(socialID SocialID) (*User, error)
 
+	// Close the repository
 	Close() error
+
+	// Remove all users from the repository (for testing purposes)
+	Truncate() error
 }

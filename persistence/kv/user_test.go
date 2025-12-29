@@ -70,9 +70,8 @@ func (suite *userRepositoryTestSuite) TestFindBySocialID() {
 }
 
 func (suite *userRepositoryTestSuite) TearDownSuite() {
+	suite.users.Truncate()
 	suite.users.Close()
-
-	// os.RemoveAll("identity")
 }
 
 func TestUserRepositoryTestSuite(t *testing.T) {

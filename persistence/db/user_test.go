@@ -70,11 +70,8 @@ func (suite *userRepositoryTestSuite) TestFindBySocialID() {
 }
 
 func (suite *userRepositoryTestSuite) TearDownSuite() {
-	db := suite.users.(Database).DB()
-	db.Exec("DROP TABLE social_accounts")
-	db.Exec("DROP TABLE users")
-
-	// os.Remove("identity.db")
+	suite.users.Truncate()
+	suite.users.Close()
 }
 
 func TestUserRepositoryTestSuite(t *testing.T) {
