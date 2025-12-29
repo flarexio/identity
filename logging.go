@@ -94,6 +94,24 @@ func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.S
 	return u, nil
 }
 
+func (mw *loggingMiddleware) RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error) {
+	log := mw.log.With(
+		zap.String("action", "remove_social_account"),
+		zap.String("provider", string(provider)),
+		zap.String("social_id", string(socialID)),
+		zap.String("username", username),
+	)
+
+	u, err := mw.next.RemoveSocialAccount(provider, socialID, username)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, err
+	}
+
+	log.Info("user social account removed")
+	return u, nil
+}
+
 func (mw *loggingMiddleware) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
 	log := mw.log.With(
 		zap.String("action", "register_passkey"),
@@ -216,6 +234,25 @@ func (mw *loggingMiddleware) UserSocialAccountAddedHandler(e *user.UserSocialAcc
 	}
 
 	log.Info("social account added")
+	return nil
+}
+
+func (mw *loggingMiddleware) UserSocialAccountRemovedHandler(e *user.UserSocialAccountRemovedEvent) error {
+	log := mw.log.With(
+		zap.String("event", e.EventName()),
+		zap.String("user_id", e.Event.UserID.String()),
+	)
+
+	handler, err := mw.next.Handler()
+	if err != nil {
+		return err
+	}
+
+	if err := handler.UserSocialAccountRemovedHandler(e); err != nil {
+		log.Error(err.Error())
+	}
+
+	log.Info("social account removed")
 	return nil
 }
 

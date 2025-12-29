@@ -29,6 +29,7 @@ type Service interface {
 	OTPVerify(otp string, username string) (*user.User, error)
 	SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
+	RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error)
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	User(username string) (*user.User, error)
 	UserBySocialID(socialID user.SocialID) (*user.User, error)
@@ -40,6 +41,7 @@ type EventHandler interface {
 	UserRegisteredHandler(e *user.UserRegisteredEvent) error
 	UserActivatedHandler(e *user.UserActivatedEvent) error
 	UserSocialAccountAddedHandler(e *user.UserSocialAccountAddedEvent) error
+	UserSocialAccountRemovedHandler(e *user.UserSocialAccountRemovedEvent) error
 	UserDeletedHandler(e *user.UserDeletedEvent) error
 }
 
@@ -316,6 +318,18 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 	return u, nil
 }
 
+func (svc *service) RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error) {
+	u, err := svc.users.FindByUsername(username)
+	if err != nil {
+		return nil, err
+	}
+
+	u.RemoveSocialAccount(provider, socialID)
+	defer u.Notify()
+
+	return u, nil
+}
+
 func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
 	u, err := svc.users.FindByUsername(username)
 	if err != nil {
@@ -374,6 +388,27 @@ func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAdded
 	}
 
 	u.Accounts = append(u.Accounts, &e.Account)
+	u.UpdatedAt = e.OccuredAt
+
+	return svc.users.Store(u)
+}
+
+func (svc *service) UserSocialAccountRemovedHandler(e *user.UserSocialAccountRemovedEvent) error {
+	u, err := svc.users.Find(e.UserID)
+	if err != nil {
+		return err
+	}
+
+	var accounts []*user.SocialAccount
+	for _, a := range u.Accounts {
+		if a.Provider == e.Account.Provider && a.SocialID == e.Account.SocialID {
+			continue
+		}
+
+		accounts = append(accounts, a)
+	}
+
+	u.Accounts = accounts
 	u.UpdatedAt = e.OccuredAt
 
 	return svc.users.Store(u)

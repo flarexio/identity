@@ -37,14 +37,27 @@ type userRepository struct {
 func (repo *userRepository) Store(u *user.User) error {
 	user := NewUser(u) // convert Domain to Data model
 
-	result := repo.db.Save(user)
-	return result.Error
+	return repo.db.Transaction(func(tx *gorm.DB) error {
+		// First, delete existing social accounts
+		if err := tx.Unscoped().
+			Where("user_id = ?", user.ID).
+			Delete(&SocialAccount{}).
+			Error; err != nil {
+			return err
+		}
+
+		// Then, save the user
+		return tx.Save(user).Error
+	})
 }
 
 func (repo *userRepository) Delete(u *user.User) error {
 	user := NewUser(u) // convert Domain to Data model
 
-	result := repo.db.Delete(&SocialAccount{}, "user_id = ?", user.ID)
+	result := repo.db.Unscoped().Delete(
+		&SocialAccount{},
+		"user_id = ?", user.ID)
+
 	if err := result.Error; err != nil {
 		return err
 	}
@@ -56,13 +69,8 @@ func (repo *userRepository) Delete(u *user.User) error {
 func (repo *userRepository) ListAll() ([]*user.User, error) {
 	var users []*User
 
-	result := repo.db.
-		Preload("Accounts").
-		Joins("LEFT JOIN social_accounts ON social_accounts.user_id = users.id").
-		Find(&users, "social_accounts.deleted_at IS NULL")
-
-	err := result.Error
-	if err != nil {
+	result := repo.db.Preload("Accounts").Find(&users)
+	if err := result.Error; err != nil {
 		return nil, err
 	}
 
@@ -77,13 +85,8 @@ func (repo *userRepository) ListAll() ([]*user.User, error) {
 func (repo *userRepository) Find(id user.UserID) (*user.User, error) {
 	var u *User
 
-	result := repo.db.
-		Preload("Accounts").
-		Joins("LEFT JOIN social_accounts ON social_accounts.user_id = users.id").
-		Take(&u, "users.id = ? AND social_accounts.deleted_at IS NULL", id.String())
-
-	err := result.Error
-	if err != nil {
+	result := repo.db.Preload("Accounts").Take(&u, "id = ?", id.String())
+	if err := result.Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, user.ErrUserNotFound
 		}
@@ -98,13 +101,8 @@ func (repo *userRepository) Find(id user.UserID) (*user.User, error) {
 func (repo *userRepository) FindByUsername(username string) (*user.User, error) {
 	var u *User
 
-	result := repo.db.
-		Preload("Accounts").
-		Joins("LEFT JOIN social_accounts ON social_accounts.user_id = users.id").
-		Take(&u, "users.username = ? AND social_accounts.deleted_at IS NULL", username)
-
-	err := result.Error
-	if err != nil {
+	result := repo.db.Preload("Accounts").Take(&u, "username = ?", username)
+	if err := result.Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, user.ErrUserNotFound
 		}
@@ -121,10 +119,9 @@ func (repo *userRepository) FindBySocialID(socialID user.SocialID) (*user.User, 
 	result := repo.db.
 		Preload("Accounts").
 		Joins("INNER JOIN social_accounts ON social_accounts.user_id = users.id").
-		Take(&u, "social_accounts.social_id = ? AND social_accounts.deleted_at IS NULL", socialID)
+		Take(&u, "social_accounts.social_id = ?", socialID)
 
-	err := result.Error
-	if err != nil {
+	if err := result.Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, user.ErrUserNotFound
 		}

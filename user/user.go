@@ -150,6 +150,7 @@ func NewUser(username string, name string, email string) *User {
 		Name:     name,
 		Email:    email,
 		Status:   Pending,
+		Accounts: make([]*SocialAccount, 0),
 		Model: model.Model{
 			CreatedAt: id.Time(),
 		},
@@ -186,18 +187,51 @@ func (u *User) Delete() {
 	u.AddEvent(e)
 }
 
-func (u *User) AddSocialAccount(provider SocialProvider, socialID SocialID) {
-	account := NewSocialAccount(provider, socialID)
-
-	if u.Accounts == nil {
-		u.Accounts = make([]*SocialAccount, 0)
+func (u *User) AddSocialAccount(provider SocialProvider, socialID SocialID) error {
+	if u.HasSocialAccount(provider, socialID) {
+		return errors.New("social account already exists")
 	}
-	u.Accounts = append(u.Accounts, account)
 
-	u.UpdatedAt = account.UpdatedAt
+	account := NewSocialAccount(provider, socialID)
+	u.Accounts = append(u.Accounts, account)
+	u.UpdatedAt = time.Now()
 
 	e := NewUserSocialAccountAddedEvent(u, account)
 	u.AddEvent(e)
+
+	return nil
+}
+
+func (u *User) RemoveSocialAccount(provider SocialProvider, socialID SocialID) error {
+	var accounts []*SocialAccount
+	for _, a := range u.Accounts {
+		if a.Provider == provider && a.SocialID == socialID {
+			e := NewUserSocialAccountRemovedEvent(u, a)
+			u.AddEvent(e)
+			continue
+		}
+
+		accounts = append(accounts, a)
+	}
+
+	if len(accounts) == len(u.Accounts) {
+		return errors.New("social account not found")
+	}
+
+	u.Accounts = accounts
+	u.UpdatedAt = time.Now()
+
+	return nil
+}
+
+func (u *User) HasSocialAccount(provider SocialProvider, socialID SocialID) bool {
+	for _, a := range u.Accounts {
+		if a.Provider == provider && a.SocialID == socialID {
+			return true
+		}
+	}
+
+	return false
 }
 
 type SocialProvider string
