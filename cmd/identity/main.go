@@ -182,12 +182,14 @@ func run(cli *cli.Context) error {
 	// Add Endpoints
 	endpoints := identity.EndpointSet{
 		// Register:         identity.RegisterEndpoint(svc),
-		SignIn:           identity.SignInEndpoint(svc),
-		OTPVerify:        identity.OTPVerifyEndpoint(svc),
-		AddSocialAccount: identity.AddSocialAccountEndpoint(svc),
-		User:             identity.UserEndpoint(svc),
-		UserBySocialID:   identity.UserBySocialIDEndpoint(svc),
-		RegisterPasskey:  identity.RegisterPasskeyEndpoint(svc),
+		SignIn:              identity.SignInEndpoint(svc),
+		OTPVerify:           identity.OTPVerifyEndpoint(svc),
+		AddSocialAccount:    identity.AddSocialAccountEndpoint(svc),
+		RemoveSocialAccount: identity.RemoveSocialAccountEndpoint(svc),
+		RegisterPasskey:     identity.RegisterPasskeyEndpoint(svc),
+		User:                identity.UserEndpoint(svc),
+		UserBySocialID:      identity.UserBySocialIDEndpoint(svc),
+		DeleteUser:          identity.DeleteUserEndpoint(svc),
 	}
 
 	// Add Transports
@@ -319,6 +321,11 @@ func run(cli *cli.Context) error {
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.AddSocialAccountHandler(endpoints.AddSocialAccount))
 
+		// DELETE /users/:user/socials
+		apiV1.DELETE("/users/:user/socials",
+			auth("identity::users.update", transHTTP.Owner),
+			transHTTP.RemoveSocialAccountHandler(endpoints.RemoveSocialAccount))
+
 		// POST /users/:user/passkeys/register
 		apiV1.POST("/users/:user/passkeys/register",
 			auth("identity::users.update", transHTTP.Owner),
@@ -329,6 +336,11 @@ func run(cli *cli.Context) error {
 
 		// PATCH /token/refresh
 		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
+
+		// DELETE /users/:user
+		apiV1.DELETE("/users/:user",
+			auth("identity::users.delete", transHTTP.Owner),
+			transHTTP.DeleteUserHandler(endpoints.DeleteUser))
 
 		// POST /passkeys/registration
 		{

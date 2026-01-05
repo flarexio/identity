@@ -3,18 +3,16 @@
         "admin": [
             {
                 "domain": "identity::users",
-                "actions": [
-                    "list",
-                    "update",
-                    "remove"
-                ]
+                "actions": []
             }
         ],
         "user": [
             {
                 "domain": "identity::users",
                 "actions": [
-                    "update"
+                    "get",
+                    "update",
+                    "delete"
                 ]
             }
         ]

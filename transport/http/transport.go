@@ -41,7 +41,7 @@ func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			err := errors.New("user not found")
+			err := errors.New("user required")
 			c.Abort()
 			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
@@ -180,7 +180,7 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			err := errors.New("user not found")
+			err := errors.New("user required")
 			c.Abort()
 			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
@@ -208,11 +208,43 @@ func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
+func RemoveSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username := c.Param("user")
+		if username == "" {
+			err := errors.New("user required")
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var req identity.RemoveSocialAccountRequest
+		if err := c.ShouldBind(&req); err != nil {
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		req.Username = username
+
+		resp, err := endpoint(c, req)
+		if err != nil {
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, &resp)
+	}
+}
+
 func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
-			err := errors.New("user not found")
+			err := errors.New("user required")
 			c.Abort()
 			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())
@@ -251,11 +283,34 @@ func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
+func DeleteUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username := c.Param("user")
+		if username == "" {
+			err := errors.New("user required")
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		_, err := endpoint(c, username)
+		if err != nil {
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		c.String(http.StatusOK, "user deleted")
+	}
+}
+
 func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subject := c.Param("subject")
 		if subject == "" {
-			err := errors.New("subject not found")
+			err := errors.New("subject required")
 			c.Abort()
 			c.Error(err)
 			c.String(http.StatusBadRequest, err.Error())

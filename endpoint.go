@@ -11,13 +11,15 @@ import (
 )
 
 type EndpointSet struct {
-	Register         endpoint.Endpoint
-	SignIn           endpoint.Endpoint
-	OTPVerify        endpoint.Endpoint
-	AddSocialAccount endpoint.Endpoint
-	RegisterPasskey  endpoint.Endpoint
-	User             endpoint.Endpoint
-	UserBySocialID   endpoint.Endpoint
+	Register            endpoint.Endpoint
+	SignIn              endpoint.Endpoint
+	OTPVerify           endpoint.Endpoint
+	AddSocialAccount    endpoint.Endpoint
+	RemoveSocialAccount endpoint.Endpoint
+	RegisterPasskey     endpoint.Endpoint
+	User                endpoint.Endpoint
+	UserBySocialID      endpoint.Endpoint
+	DeleteUser          endpoint.Endpoint
 }
 
 type RegisterRequest struct {
@@ -33,12 +35,7 @@ func RegisterEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.Register(req.Username, req.Name, req.Email)
-		if err != nil {
-			return nil, err
-		}
-
-		return u, nil
+		return svc.Register(req.Username, req.Name, req.Email)
 	}
 }
 
@@ -54,12 +51,7 @@ func OTPVerifyEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.OTPVerify(req.OTP, req.Username)
-		if err != nil {
-			return nil, err
-		}
-
-		return u, nil
+		return svc.OTPVerify(req.OTP, req.Username)
 	}
 }
 
@@ -111,12 +103,24 @@ func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.AddSocialAccount(req.Credential, req.Provider, req.Username)
-		if err != nil {
-			return nil, err
+		return svc.AddSocialAccount(req.Credential, req.Provider, req.Username)
+	}
+}
+
+type RemoveSocialAccountRequest struct {
+	Provider user.SocialProvider
+	SocialID user.SocialID
+	Username string
+}
+
+func RemoveSocialAccountEndpoint(svc Service) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (response any, err error) {
+		req, ok := request.(RemoveSocialAccountRequest)
+		if !ok {
+			return nil, errors.New("invalid request")
 		}
 
-		return u, nil
+		return svc.RemoveSocialAccount(req.Provider, req.SocialID, req.Username)
 	}
 }
 
@@ -127,12 +131,7 @@ func RegisterPasskeyEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		opts, err := svc.RegisterPasskey(username)
-		if err != nil {
-			return nil, err
-		}
-
-		return opts, nil
+		return svc.RegisterPasskey(username)
 	}
 }
 
@@ -143,12 +142,7 @@ func UserEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.User(username)
-		if err != nil {
-			return nil, err
-		}
-
-		return u, nil
+		return svc.User(username)
 	}
 }
 
@@ -159,12 +153,18 @@ func UserBySocialIDEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		u, err := svc.UserBySocialID(socialID)
-		if err != nil {
-			return nil, err
+		return svc.UserBySocialID(socialID)
+	}
+}
+
+func DeleteUserEndpoint(svc Service) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (response any, err error) {
+		username, ok := request.(string)
+		if !ok {
+			return nil, errors.New("invalid request")
 		}
 
-		return u, nil
+		return nil, svc.DeleteUser(username)
 	}
 }
 
