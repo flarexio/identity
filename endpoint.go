@@ -182,6 +182,10 @@ func EventEndpoint(svc Service) endpoint.Endpoint {
 			err = handler.UserActivatedHandler(e)
 		case *user.UserSocialAccountAddedEvent:
 			err = handler.UserSocialAccountAddedHandler(e)
+		case *user.UserSocialAccountRemovedEvent:
+			err = handler.UserSocialAccountRemovedHandler(e)
+		case *user.UserDeletedEvent:
+			err = handler.UserDeletedHandler(e)
 		default:
 			err = errors.New("invalid request")
 		}

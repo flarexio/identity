@@ -46,8 +46,22 @@ func EventHandler(endpoint endpoint.Endpoint) pubsub.MessageHandler {
 			}
 			event = e
 
+		case user.UserSocialAccountRemoved:
+			var e *user.UserSocialAccountRemovedEvent
+			if err := json.Unmarshal(msg.Data, &e); err != nil {
+				return err
+			}
+			event = e
+
+		case user.UserDeleted:
+			var e *user.UserDeletedEvent
+			if err := json.Unmarshal(msg.Data, &e); err != nil {
+				return err
+			}
+			event = e
+
 		default:
-			return errors.New("invalid event")
+			return errors.New("unknown event")
 		}
 
 		_, err := endpoint(ctx, event)
