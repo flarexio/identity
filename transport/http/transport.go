@@ -240,7 +240,7 @@ func RemoveSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
-func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
 		if username == "" {
@@ -252,26 +252,6 @@ func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		}
 
 		resp, err := endpoint(c, username)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		c.JSON(http.StatusOK, &resp)
-	}
-}
-
-func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var claims Claims
-		if err := ParseToken(c, &claims); err != nil {
-			unauthorized(c, http.StatusUnauthorized, err)
-			return
-		}
-
-		resp, err := endpoint(c, claims.Subject)
 		if err != nil {
 			c.Abort()
 			c.Error(err)
@@ -303,6 +283,29 @@ func DeleteUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 		}
 
 		c.String(http.StatusOK, "user deleted")
+	}
+}
+
+func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username := c.Param("user")
+		if username == "" {
+			err := errors.New("user required")
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		resp, err := endpoint(c, username)
+		if err != nil {
+			c.Abort()
+			c.Error(err)
+			c.String(http.StatusExpectationFailed, err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, &resp)
 	}
 }
 

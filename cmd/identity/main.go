@@ -278,17 +278,6 @@ func run(cli *cli.Context) error {
 		c.JSON(http.StatusOK, gin.H{"origins": cfg.Providers.Passkeys.Origins})
 	})
 
-	if provider := cfg.Providers.LINE; provider.Channel.ID != "" {
-		line.SetConfig(provider)
-
-		// GET /auth/line
-		r.GET("/auth/line", line.LoginAuthURLHandler())
-
-		// GET /auth/line/callback
-		r.GET("/auth/line/callback",
-			line.AuthCallback(endpoints.SignIn, endpoints.AddSocialAccount))
-	}
-
 	transHTTP.Init(
 		cfg.BaseURL,          // issuer
 		cfg.JWT.Audiences[0], // audience
@@ -302,6 +291,22 @@ func run(cli *cli.Context) error {
 	}
 
 	auth := transHTTP.Authorizator(policy)
+
+	if provider := cfg.Providers.LINE; provider.Channel.ID != "" {
+		line.SetConfig(provider)
+
+		// GET /auth/line
+		r.GET("/auth/line", line.LoginAuthURLHandler(line.SignIn))
+
+		// GET /auth/line/callback
+		r.GET("/auth/line/callback",
+			line.AuthCallback(endpoints.SignIn, endpoints.AddSocialAccount))
+
+		// GET /auth/line/link/:user
+		r.GET("/auth/line/link/:user",
+			auth("identity::users.update", transHTTP.Owner),
+			line.LoginAuthURLHandler(line.LinkAccount))
+	}
 
 	apiV1 := r.Group("/identity/v1")
 	{
@@ -331,16 +336,18 @@ func run(cli *cli.Context) error {
 			auth("identity::users.update", transHTTP.Owner),
 			transHTTP.RegisterPasskeyHandler(endpoints.RegisterPasskey))
 
-		// GET /token/user
-		apiV1.GET("/token/user", transHTTP.UserHandler(endpoints.User))
-
-		// PATCH /token/refresh
-		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
+		// GET /users/:user
+		apiV1.GET("/users/:user",
+			auth("identity::users.get", transHTTP.Owner),
+			transHTTP.UserHandler(endpoints.User))
 
 		// DELETE /users/:user
 		apiV1.DELETE("/users/:user",
 			auth("identity::users.delete", transHTTP.Owner),
 			transHTTP.DeleteUserHandler(endpoints.DeleteUser))
+
+		// PATCH /token/refresh
+		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
 
 		// POST /passkeys/registration
 		{

@@ -41,9 +41,9 @@ func ParseToken(ctx *gin.Context, claims jwt.Claims) error {
 		return ErrTokenNotInit
 	}
 
-	tokenStr := ctx.GetHeader("Authorization")
+	authHeader := ctx.GetHeader("Authorization")
 
-	tokenStr, ok := strings.CutPrefix(tokenStr, "Bearer ")
+	tokenStr, ok := strings.CutPrefix(authHeader, "Bearer ")
 	if !ok {
 		return ErrInvalidToken
 	}

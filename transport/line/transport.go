@@ -51,7 +51,7 @@ func generateRandomString(length int) string {
 type SessionOperation string
 
 const (
-	SingIn      SessionOperation = "signin"
+	SignIn      SessionOperation = "signin"
 	LinkAccount SessionOperation = "link_account"
 )
 
@@ -62,28 +62,28 @@ type Session struct {
 	Username string
 }
 
-func NewSession(op string) *Session {
+func NewSession(op SessionOperation) *Session {
 	return &Session{
 		State: generateRandomString(32),
 		Nonce: generateRandomString(32),
-		Op:    SessionOperation(op),
+		Op:    op,
 	}
 }
 
-func LoginAuthURLHandler() gin.HandlerFunc {
+func LoginAuthURLHandler(op SessionOperation) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		op := c.Query("op")
-		if op == "" {
-			err := errors.New("operation is required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
 		session := NewSession(op)
 
-		if username := c.Query("username"); username != "" {
+		if op == LinkAccount {
+			username := c.Param("user")
+			if username == "" {
+				err := errors.New("user required")
+				c.Abort()
+				c.Error(err)
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
+
 			session.Username = username
 		}
 
@@ -94,7 +94,13 @@ func LoginAuthURLHandler() gin.HandlerFunc {
 			oauth2.SetAuthURLParam("nonce", session.Nonce),
 		)
 
-		c.Redirect(http.StatusFound, authURL)
+		switch op {
+		case SignIn:
+			c.Redirect(http.StatusFound, authURL)
+
+		case LinkAccount:
+			c.String(http.StatusOK, authURL)
+		}
 	}
 }
 
@@ -158,7 +164,7 @@ func AuthCallback(signInEndpoint endpoint.Endpoint, addSocialAccountEndpoint end
 		}
 
 		switch session.Op {
-		case SingIn:
+		case SignIn:
 			req := identity.SignInRequest{
 				Provider:   user.LINE,
 				Credential: idToken,
