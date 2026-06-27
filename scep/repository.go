@@ -2,8 +2,7 @@ package scep
 
 import "time"
 
-// Store persists pending one-time challenges. Consume MUST be atomic so a
-// challenge can never be redeemed twice.
+// Store persists pending one-time challenges; Consume must be atomic.
 type Store interface {
 	// Command
 

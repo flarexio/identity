@@ -366,7 +366,6 @@ func run(cli *cli.Context) error {
 		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
 		r.GET("/users/:subject", transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
 
-		// POST /scep/challenge/verify (StepCA SCEPCHALLENGE webhook)
 		challenges, err := inmem.NewChallengeStore()
 		if err != nil {
 			return err
@@ -374,8 +373,18 @@ func run(cli *cli.Context) error {
 		defer challenges.Close()
 
 		scepSvc := scep.NewService(challenges, 0)
-		verifyEndpoint := scep.VerifyEndpoint(scepSvc)
-		r.POST("/scep/challenge/verify", transHTTP.SCEPVerifyHandler(verifyEndpoint))
+
+		// POST /scep/challenge/generate
+		{
+			endpoint := scep.GenerateEndpoint(scepSvc)
+			r.POST("/scep/challenge/generate", transHTTP.SCEPGenerateHandler(endpoint))
+		}
+
+		// POST /scep/challenge/verify
+		{
+			endpoint := scep.VerifyEndpoint(scepSvc)
+			r.POST("/scep/challenge/verify", transHTTP.SCEPVerifyHandler(endpoint))
+		}
 
 		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
 

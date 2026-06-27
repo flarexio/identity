@@ -7,13 +7,10 @@ import (
 	"time"
 )
 
-// ErrChallengeInvalid collapses unknown/used/expired into one error so the
-// webhook never leaks which case it was.
+// ErrChallengeInvalid collapses unknown/used/expired into one error.
 var ErrChallengeInvalid = errors.New("challenge invalid")
 
-// Service issues and verifies one-time SCEP enrollment challenges. Generate
-// mints a challenge bound to a subject (embedded in the .mobileconfig); Verify
-// consumes it from StepCA's SCEPCHALLENGE webhook and returns that subject.
+// Service issues and verifies one-time SCEP enrollment challenges.
 type Service interface {
 	Generate(subject string) (string, error)
 	Verify(challenge string) (subject string, err error)
@@ -34,8 +31,7 @@ type service struct {
 }
 
 func (svc *service) Generate(subject string) (string, error) {
-	// 256 bits of entropy.
-	buf := make([]byte, 32)
+	buf := make([]byte, 32) // 256 bits
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}

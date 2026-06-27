@@ -13,7 +13,6 @@ func NewChallengeStore() (scep.Store, error) {
 		done:       make(chan struct{}),
 	}
 
-	// Sweep expired-but-never-consumed challenges so the map can't grow unbounded.
 	go store.janitor(time.Minute)
 
 	return store, nil
@@ -51,8 +50,7 @@ func (s *challengeStore) Consume(ch string) (string, error) {
 		return "", scep.ErrChallengeInvalid
 	}
 
-	// One-time: delete on first read regardless of expiry. The lock makes
-	// lookup+delete atomic, so a challenge can never be redeemed twice.
+	// One-time: delete on first read (lock makes lookup+delete atomic).
 	delete(s.challenges, ch)
 
 	if time.Now().After(c.expiresAt) {

@@ -148,9 +148,7 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// SCEP holds the StepCA SCEPCHALLENGE webhook settings. WebhookID is a public
-// routing identifier; WebhookSecret is stored base64 and decoded here into the
-// raw HMAC key bytes.
+// SCEP holds the StepCA SCEPCHALLENGE webhook settings.
 type SCEP struct {
 	WebhookID     string
 	WebhookSecret []byte

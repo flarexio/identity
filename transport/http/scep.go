@@ -16,22 +16,53 @@ import (
 	"github.com/flarexio/identity/conf"
 )
 
-// scepWebhookRequest is the subset of StepCA's SCEPCHALLENGE webhook body we use.
+type scepGenerateRequest struct {
+	Subject string `json:"subject"`
+}
+
 type scepWebhookRequest struct {
 	SCEPChallenge     string `json:"scepChallenge"`
 	SCEPTransactionID string `json:"scepTransactionID"`
 }
 
-// SCEPVerifyHandler serves StepCA's SCEPCHALLENGE webhook. It authenticates the
-// call by HMAC (X-Smallstep-Signature over the raw body), consumes the challenge
-// via the endpoint, and answers {"allow": bool}. The webhook id and HMAC secret
-// come from conf.G().SCEP; the id, when set, is sanity-checked against the
-// X-Smallstep-Webhook-Id header.
+// SCEPGenerateHandler mints a one-time challenge for the requested subject.
+func SCEPGenerateHandler(ep endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req scepGenerateRequest
+		if err := c.ShouldBind(&req); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			c.Error(err)
+			c.Abort()
+			return
+		}
+
+		if req.Subject == "" {
+			err := errors.New("subject required")
+			c.String(http.StatusBadRequest, err.Error())
+			c.Error(err)
+			c.Abort()
+			return
+		}
+
+		challenge, err := ep(c.Request.Context(), req.Subject)
+		if err != nil {
+			c.String(http.StatusExpectationFailed, err.Error())
+			c.Error(err)
+			c.Abort()
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"challenge": challenge})
+	}
+}
+
+// SCEPVerifyHandler serves StepCA's SCEPCHALLENGE webhook, authenticated by HMAC
+// over the raw body, and answers {"allow": bool}.
 func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := conf.G().SCEP
-		// TEMP (discovery): StepCA presents its own self-generated leaf here.
-		// Log it once so we can decide whether to pin its CN later.
+
+		// TEMP (discovery): log StepCA's self-generated leaf to decide pinning.
 		if tls := c.Request.TLS; tls != nil && len(tls.PeerCertificates) > 0 {
 			peer := tls.PeerCertificates[0]
 			zap.L().Info("scep webhook client cert",
@@ -40,9 +71,7 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 			)
 		}
 
-		// Cheap fail-fast first: the id is public and not covered by the HMAC, so
-		// it's only a sanity check—but rejecting a misrouted call here avoids
-		// reading the body and computing the HMAC below.
+		// id is public and unsigned: a cheap fail-fast, not the gate.
 		if cfg.WebhookID != "" && c.GetHeader("X-Smallstep-Webhook-Id") != cfg.WebhookID {
 			err := errors.New("unexpected webhook id")
 			c.String(http.StatusBadRequest, err.Error())
@@ -51,7 +80,6 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		// Raw body is needed for the HMAC, so read it ourselves instead of binding.
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
@@ -60,7 +88,6 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		// HMAC over the raw body is the real gate.
 		if !validSCEPSignature(c.GetHeader("X-Smallstep-Signature"), body, cfg.WebhookSecret) {
 			err := errors.New("invalid webhook signature")
 			c.String(http.StatusUnauthorized, err.Error())
@@ -96,7 +123,6 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
-// validSCEPSignature constant-time compares StepCA's hex HMAC-SHA256 of the body.
 func validSCEPSignature(header string, body, secret []byte) bool {
 	if header == "" {
 		return false
