@@ -72,6 +72,7 @@ type Config struct {
 	Name        string      `yaml:"name"`
 	BaseURL     string      `yaml:"baseUrl"`
 	JWT         JWT         `yaml:"jwt"`
+	SCEP        SCEP        `yaml:"scep"`
 	Persistence Persistence `yaml:"persistence"`
 	EventBus    EventBus    `yaml:"eventBus"`
 	Providers   Providers   `yaml:"providers"`
@@ -144,6 +145,39 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 
 	cfg.Audiences = raw.Audiences
 
+	return nil
+}
+
+// SCEP holds the StepCA SCEPCHALLENGE webhook settings. WebhookID is a public
+// routing identifier; WebhookSecret is stored base64 and decoded here into the
+// raw HMAC key bytes.
+type SCEP struct {
+	WebhookID     string
+	WebhookSecret []byte
+}
+
+func (cfg *SCEP) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		WebhookID     string `yaml:"webhookID"`
+		WebhookSecret string `yaml:"webhookSecret"`
+	}
+
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	cfg.WebhookID = raw.WebhookID
+
+	if raw.WebhookSecret == "" {
+		return nil
+	}
+
+	secret, err := base64.StdEncoding.DecodeString(raw.WebhookSecret)
+	if err != nil {
+		return err
+	}
+
+	cfg.WebhookSecret = secret
 	return nil
 }
 

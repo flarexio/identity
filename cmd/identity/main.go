@@ -29,6 +29,8 @@ import (
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
+	"github.com/flarexio/identity/persistence/inmem"
+	"github.com/flarexio/identity/scep"
 	"github.com/flarexio/identity/transport/line"
 
 	transHTTP "github.com/flarexio/identity/transport/http"
@@ -363,6 +365,17 @@ func run(cli *cli.Context) error {
 		r := gin.Default()
 		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
 		r.GET("/users/:subject", transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
+
+		// POST /scep/challenge/verify (StepCA SCEPCHALLENGE webhook)
+		challenges, err := inmem.NewChallengeStore()
+		if err != nil {
+			return err
+		}
+		defer challenges.Close()
+
+		scepSvc := scep.NewService(challenges, 0)
+		verifyEndpoint := scep.VerifyEndpoint(scepSvc)
+		r.POST("/scep/challenge/verify", transHTTP.SCEPVerifyHandler(verifyEndpoint))
 
 		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
 
