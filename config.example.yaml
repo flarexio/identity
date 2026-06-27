@@ -13,6 +13,10 @@ jwt:
   - wallet.flarex.io
   - talkix.flarex.io
 
+scep:
+  webhookID: webhook_id # stepca_scepchallenge_webhook_id
+  webhookSecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= # stepca_scepchallenge_hmac_secret_base64
+
 persistence:
   driver: badger
   name: users
