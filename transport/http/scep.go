@@ -62,13 +62,22 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := conf.G().SCEP
 
-		// TEMP (discovery): log StepCA's self-generated leaf to decide pinning.
+		// The mTLS layer already verified this cert against ClientCAs, so its
+		// Subject/Issuer are trustworthy; pin them to StepCA's leaf.
 		if tls := c.Request.TLS; tls != nil && len(tls.PeerCertificates) > 0 {
 			peer := tls.PeerCertificates[0]
 			zap.L().Info("scep webhook client cert",
 				zap.String("subject", peer.Subject.String()),
 				zap.String("issuer", peer.Issuer.String()),
 			)
+
+			if cfg.WebhookClientCN != "" && peer.Subject.CommonName != cfg.WebhookClientCN {
+				err := errors.New("unexpected webhook client certificate")
+				c.String(http.StatusUnauthorized, err.Error())
+				c.Error(err)
+				c.Abort()
+				return
+			}
 		}
 
 		// id is public and unsigned: a cheap fail-fast, not the gate.

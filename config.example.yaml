@@ -16,6 +16,7 @@ jwt:
 scep:
   webhookID: webhook_id # stepca_scepchallenge_webhook_id
   webhookSecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= # stepca_scepchallenge_hmac_secret_base64
+  webhookClientCN: Step Online CA # pin mTLS client cert Subject CN (empty = no check)
 
 persistence:
   driver: badger
