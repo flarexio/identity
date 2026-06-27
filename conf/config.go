@@ -150,14 +150,16 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 
 // SCEP holds the StepCA SCEPCHALLENGE webhook settings.
 type SCEP struct {
-	WebhookID     string
-	WebhookSecret []byte
+	WebhookID       string
+	WebhookSecret   []byte
+	WebhookClientCN string // expected mTLS client cert Subject CN (empty = no check)
 }
 
 func (cfg *SCEP) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
-		WebhookID     string `yaml:"webhookID"`
-		WebhookSecret string `yaml:"webhookSecret"`
+		WebhookID       string `yaml:"webhookID"`
+		WebhookSecret   string `yaml:"webhookSecret"`
+		WebhookClientCN string `yaml:"webhookClientCN"`
 	}
 
 	if err := value.Decode(&raw); err != nil {
@@ -165,9 +167,10 @@ func (cfg *SCEP) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	cfg.WebhookID = raw.WebhookID
+	cfg.WebhookClientCN = raw.WebhookClientCN
 
 	if raw.WebhookSecret == "" {
-		return nil
+		return errors.New("scep: webhookSecret is required")
 	}
 
 	secret, err := base64.StdEncoding.DecodeString(raw.WebhookSecret)
