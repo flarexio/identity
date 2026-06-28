@@ -12,6 +12,7 @@ jwt:
   - identity.flarex.io
   - wallet.flarex.io
   - talkix.flarex.io
+  - mdm.flarex.io
 
 scep:
   webhookID: webhook_id # stepca_scepchallenge_webhook_id
