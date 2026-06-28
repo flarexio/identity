@@ -3,6 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,16 @@ import (
 	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/user"
 )
+
+// rolesFor returns the roles embedded in a user's token. Everyone is a "user";
+// usernames listed in jwt.admins additionally get "admin".
+func rolesFor(username string) []string {
+	roles := []string{"user"}
+	if slices.Contains(conf.G().JWT.Admins, username) {
+		roles = append(roles, "admin")
+	}
+	return roles
+}
 
 func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -108,7 +119,7 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
 			},
-			Roles: []string{"user"},
+			Roles: rolesFor(u.Username),
 		}
 
 		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -351,7 +362,7 @@ func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
 			},
-			Roles: []string{"user"},
+			Roles: rolesFor(u.Username),
 		}
 
 		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

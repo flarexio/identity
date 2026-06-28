@@ -87,6 +87,7 @@ type JWT struct {
 		Maximum time.Duration
 	}
 	Audiences []string
+	Admins    []string // usernames granted the "admin" role in their token
 }
 
 func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
@@ -98,6 +99,7 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 			Maximum string
 		}
 		Audiences []string
+		Admins    []string
 	}
 
 	if err := value.Decode(&raw); err != nil {
@@ -144,6 +146,7 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	cfg.Audiences = raw.Audiences
+	cfg.Admins = raw.Admins
 
 	return nil
 }

@@ -13,6 +13,8 @@ jwt:
   - wallet.flarex.io
   - talkix.flarex.io
   - mdm.flarex.io
+  admins:                 # usernames granted the "admin" role in their token
+  - admin
 
 scep:
   webhookID: webhook_id # stepca_scepchallenge_webhook_id
