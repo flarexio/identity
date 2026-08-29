@@ -29,7 +29,7 @@ type Service interface {
 	Register(username string, name string, email string) (*user.User, error)
 	OTPVerify(otp string, username string) (*user.User, error)
 	SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error)
-	AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error)
+	AddSocialAccount(ctx context.Context, credential string, provider user.SocialProvider, username string) (*user.User, error)
 	RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error)
 	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
 	User(username string) (*user.User, error)
@@ -244,7 +244,7 @@ func (svc *service) signInWithPasskeys(signed string) (*user.User, error) {
 	return svc.users.FindBySocialID(socialID)
 }
 
-func (svc *service) AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error) {
+func (svc *service) AddSocialAccount(ctx context.Context, credential string, provider user.SocialProvider, username string) (*user.User, error) {
 	u, err := svc.users.FindByUsername(username)
 	if err != nil {
 		return nil, err
@@ -258,7 +258,6 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 			return nil, ErrAudienceNotFound
 		}
 
-		ctx := context.Background()
 		payload, err := idtoken.Validate(ctx, credential, audience)
 		if err != nil {
 			return nil, err
@@ -286,6 +285,11 @@ func (svc *service) AddSocialAccount(credential string, provider user.SocialProv
 			jwt.WithLeeway(10*time.Second),
 		); err != nil {
 			return nil, err
+		}
+
+		nonce, ok := ctx.Value(user.Nonce).(string)
+		if !ok || (nonce != claims.Nonce) {
+			return nil, errors.New("invalid nonce")
 		}
 
 		subject = claims.Subject

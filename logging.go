@@ -77,14 +77,14 @@ func (mw *loggingMiddleware) SignIn(ctx context.Context, credential string, prov
 	return u, nil
 }
 
-func (mw *loggingMiddleware) AddSocialAccount(credential string, provider user.SocialProvider, username string) (*user.User, error) {
+func (mw *loggingMiddleware) AddSocialAccount(ctx context.Context, credential string, provider user.SocialProvider, username string) (*user.User, error) {
 	log := mw.log.With(
 		zap.String("action", "add_social_account"),
 		zap.String("provider", string(provider)),
 		zap.String("username", username),
 	)
 
-	u, err := mw.next.AddSocialAccount(credential, provider, username)
+	u, err := mw.next.AddSocialAccount(ctx, credential, provider, username)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, err
