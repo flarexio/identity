@@ -22,6 +22,7 @@ var (
 	ErrEmailNotFound        = errors.New("email not found")
 	ErrNameNotFound         = errors.New("name not found")
 	ErrPictureNotFound      = errors.New("picture not found")
+	ErrLastSocialAccount    = errors.New("cannot remove the last social account")
 )
 
 type Service interface {
@@ -324,7 +325,13 @@ func (svc *service) RemoveSocialAccount(provider user.SocialProvider, socialID u
 		return nil, err
 	}
 
-	u.RemoveSocialAccount(provider, socialID)
+	if len(u.Accounts) <= 1 {
+		return nil, ErrLastSocialAccount
+	}
+
+	if err := u.RemoveSocialAccount(provider, socialID); err != nil {
+		return nil, err
+	}
 	defer u.Notify()
 
 	return u, nil
