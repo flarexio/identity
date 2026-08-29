@@ -80,3 +80,34 @@ func Authorizator(policy policy.Policy) GinAuth {
 		}
 	}
 }
+
+// RequireClientOU restricts an mTLS route to peers whose client certificate
+// Subject.OrganizationalUnit intersects allowedOUs. If allowedOUs is empty,
+// every request is rejected (fail closed) rather than left unrestricted.
+func RequireClientOU(allowedOUs []string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(allowedOUs))
+	for _, ou := range allowedOUs {
+		allowed[ou] = struct{}{}
+	}
+
+	return func(c *gin.Context) {
+		tlsState := c.Request.TLS
+		if tlsState == nil || len(tlsState.PeerCertificates) == 0 {
+			c.Abort()
+			c.String(http.StatusUnauthorized, "client certificate required")
+			return
+		}
+
+		cert := tlsState.PeerCertificates[0]
+
+		for _, ou := range cert.Subject.OrganizationalUnit {
+			if _, ok := allowed[ou]; ok {
+				c.Next()
+				return
+			}
+		}
+
+		c.Abort()
+		c.String(http.StatusForbidden, "client certificate not authorized")
+	}
+}

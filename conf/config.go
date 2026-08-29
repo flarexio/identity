@@ -76,7 +76,15 @@ type Config struct {
 	Persistence Persistence `yaml:"persistence"`
 	EventBus    EventBus    `yaml:"eventBus"`
 	Providers   Providers   `yaml:"providers"`
+	MTLS        MTLS        `yaml:"mtls"`
 	Test        Test        `yaml:"test"`
+}
+
+// MTLS controls which internal service certificates may call the mTLS
+// transport. A client certificate is accepted only if its Subject's
+// OrganizationalUnit intersects AllowedOUs.
+type MTLS struct {
+	AllowedOUs []string `yaml:"allowedOUs"`
 }
 
 type JWT struct {

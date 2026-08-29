@@ -364,7 +364,10 @@ func run(cli *cli.Context) error {
 	if cli.Bool("mtls-enabled") {
 		r := gin.Default()
 		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
-		r.GET("/users/:subject", transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
+
+		requireClientOU := transHTTP.RequireClientOU(cfg.MTLS.AllowedOUs)
+		r.GET("/users/:subject", requireClientOU,
+			transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
 
 		challenges, err := inmem.NewChallengeStore()
 		if err != nil {

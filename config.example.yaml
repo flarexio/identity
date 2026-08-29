@@ -66,6 +66,10 @@ providers:
     - https://identity.flarex.io
     - https://wallet.flarex.io
 
+mtls:
+  allowedOUs:
+  - Service
+
 test:
   tokens:
     google: YOUR_GOOGLE_JWT_TOKEN
