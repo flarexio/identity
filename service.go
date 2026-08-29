@@ -343,9 +343,13 @@ func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreati
 		return nil, err
 	}
 
-	userID := uuid.New()
-
-	return svc.passkeys.InitializeRegistration(userID.String(), u.Username)
+	// Reuse the identity user's own ID as the WebAuthn user handle so that
+	// every passkey this user registers (across devices/ceremonies) is
+	// grouped under the same user on the external Passkeys API. A fresh
+	// random ID per call would make each registration look like a
+	// different user there, breaking excludeCredentials and discoverable
+	// credential lookups.
+	return svc.passkeys.InitializeRegistration(u.ID.String(), u.Username)
 }
 
 func (svc *service) User(username string) (*user.User, error) {
