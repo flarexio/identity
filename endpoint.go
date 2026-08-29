@@ -103,7 +103,7 @@ func AddSocialAccountEndpoint(svc Service) endpoint.Endpoint {
 			return nil, errors.New("invalid request")
 		}
 
-		return svc.AddSocialAccount(req.Credential, req.Provider, req.Username)
+		return svc.AddSocialAccount(ctx, req.Credential, req.Provider, req.Username)
 	}
 }
 
