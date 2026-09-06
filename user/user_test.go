@@ -27,8 +27,6 @@ func TestRegister(t *testing.T) {
 	fmt.Println(string(jsonStr))
 }
 
-// Relying parties gate actions behind a passkey, so they need to know which
-// passkey user the token's subject is.
 func TestSocialID(t *testing.T) {
 	assert := assert.New(t)
 

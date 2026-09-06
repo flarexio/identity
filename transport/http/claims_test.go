@@ -9,8 +9,7 @@ import (
 	"github.com/flarexio/identity/user"
 )
 
-// The claim has to survive a round trip through JSON under the name relying
-// parties read it by.
+// Relying parties read it by name, so the name is part of the contract.
 func TestPasskeyUserIDClaim(t *testing.T) {
 	assert := assert.New(t)
 
@@ -32,8 +31,7 @@ func TestPasskeyUserIDClaim(t *testing.T) {
 	}
 }
 
-// A user with no passkey linked gets no claim at all, rather than an empty
-// one a relying party might compare against.
+// No passkey linked means no claim, not an empty one.
 func TestPasskeyUserIDOmittedWhenAbsent(t *testing.T) {
 	assert := assert.New(t)
 

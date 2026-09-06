@@ -388,8 +388,6 @@ func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	}
 }
 
-// passkeyUserID is empty for users who have not linked a passkey, which keeps
-// the claim absent rather than wrong.
 func passkeyUserID(u *user.User) string {
 	id, ok := u.SocialID(user.PASSKEYS)
 	if !ok {
