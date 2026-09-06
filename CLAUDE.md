@@ -67,6 +67,10 @@ Only Google and LINE can create a brand-new user on first sign-in (see the `Find
 
 Identity mints its own ed25519 (EdDSA) JWT after a successful sign-in — independent of whatever token the social provider issued — via `transport/http/token.go` (`Init`, `ParseToken`) and `transport/http/transport.go` (`SignInHandler`). `sub` is the *username*, not a social ID. The public key is exposed as JWKS at `/.well-known/jwks.json` so other services (and `transport/http/middleware.go`'s own `Authorizator`) can verify tokens issued here. `PATCH /token/refresh` reissues a token within `jwt.refresh.maximum` of the original `iat`.
 
+Alongside `sub` and `roles`, the token carries `passkey_user_id` — the subject's `SocialAccount` id for provider `passkeys`, read via `user.User.SocialID`. A relying party that gates an action behind a passkey assertion needs it: the passkey provider's user id is a different namespace from the username in `sub`, so without this claim nothing ties a verified assertion to an account. `flarexio/wallet` compares it against the `user_id` in its sign requests. The claim is **omitted** for users with no passkey linked, so a relying party sees nothing rather than an empty string it might match against.
+
+`RefreshHandler` re-signs the claims it parsed, so a token issued before the claim existed gains it on a fresh sign-in, not on refresh. Relying parties have to treat an absent claim as "unknown" until circulation turns over.
+
 ### Persistence
 
 `user.Repository` is the single interface all storage backends implement; `persistence.NewUserRepository` picks one by `persistence.driver` in config: `sqlite` (`persistence/db`, gorm), `badger` (`persistence/kv`), or `inmem` (`persistence/inmem`, tests only). `scep.Store` (only a plain in-memory challenge store today, `persistence/inmem/scep.go`) is separate and unrelated to the user repository.
