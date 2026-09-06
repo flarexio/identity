@@ -15,10 +15,8 @@ type Claims struct {
 	jwt.RegisteredClaims
 	Roles []string `json:"roles"`
 
-	// PasskeyUserID is the subject's id at the passkey provider. A relying
-	// party that gates an action behind a passkey has no other way to tell
-	// whether the assertion it verified belongs to the token's subject.
-	// Absent when the user has no passkey linked.
+	// Absent when the user has no passkey linked, so that a relying party sees
+	// nothing rather than an empty string it might match against.
 	PasskeyUserID string `json:"passkey_user_id,omitempty"`
 }
 
