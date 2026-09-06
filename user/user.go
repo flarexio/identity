@@ -251,6 +251,18 @@ type SocialAccount struct {
 	model.Model
 }
 
+// SocialID returns the user's id at the given provider. Relying parties need
+// it to tell whether a credential presented to them belongs to this user.
+func (u *User) SocialID(provider SocialProvider) (SocialID, bool) {
+	for _, a := range u.Accounts {
+		if a.Provider == provider {
+			return a.SocialID, true
+		}
+	}
+
+	return "", false
+}
+
 func NewSocialAccount(provider SocialProvider, id SocialID) *SocialAccount {
 	return &SocialAccount{
 		SocialID: id,

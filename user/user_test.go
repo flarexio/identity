@@ -26,3 +26,37 @@ func TestRegister(t *testing.T) {
 
 	fmt.Println(string(jsonStr))
 }
+
+// Relying parties gate actions behind a passkey, so they need to know which
+// passkey user the token's subject is.
+func TestSocialID(t *testing.T) {
+	assert := assert.New(t)
+
+	u := NewUser("user01", "User01", "user01@example.com")
+
+	_, ok := u.SocialID(PASSKEYS)
+	assert.False(ok, "a user with no linked accounts has no passkey id")
+
+	if err := u.AddSocialAccount(GOOGLE, "google-123"); err != nil {
+		assert.Fail(err.Error())
+		return
+	}
+
+	_, ok = u.SocialID(PASSKEYS)
+	assert.False(ok, "another provider must not answer for passkeys")
+
+	if err := u.AddSocialAccount(PASSKEYS, "hanko-abc"); err != nil {
+		assert.Fail(err.Error())
+		return
+	}
+
+	id, ok := u.SocialID(PASSKEYS)
+	if assert.True(ok) {
+		assert.Equal(SocialID("hanko-abc"), id)
+	}
+
+	google, ok := u.SocialID(GOOGLE)
+	if assert.True(ok) {
+		assert.Equal(SocialID("google-123"), google)
+	}
+}

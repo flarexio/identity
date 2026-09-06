@@ -119,7 +119,8 @@ func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
 			},
-			Roles: rolesFor(u.Username),
+			Roles:         rolesFor(u.Username),
+			PasskeyUserID: passkeyUserID(u),
 		}
 
 		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -362,7 +363,8 @@ func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 				IssuedAt:  jwt.NewNumericDate(now),
 				ID:        ulid.Make().String(),
 			},
-			Roles: rolesFor(u.Username),
+			Roles:         rolesFor(u.Username),
+			PasskeyUserID: passkeyUserID(u),
 		}
 
 		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -384,4 +386,15 @@ func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, &response)
 	}
+}
+
+// passkeyUserID is empty for users who have not linked a passkey, which keeps
+// the claim absent rather than wrong.
+func passkeyUserID(u *user.User) string {
+	id, ok := u.SocialID(user.PASSKEYS)
+	if !ok {
+		return ""
+	}
+
+	return string(id)
 }
