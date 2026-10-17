@@ -1,0 +1,5 @@
+{
+  "/identity": { "target": "http://localhost:8080" },
+  "/auth": { "target": "http://localhost:8080" },
+  "/.well-known": { "target": "http://localhost:8080" }
+}

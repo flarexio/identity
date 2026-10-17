@@ -85,7 +85,11 @@ func SessionTokenHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 
 		resp, err := endpoint(c.Request.Context(), session)
 		if err != nil {
-			clearSession(c)
+			// A session that is over goes; one we merely failed to serve
+			// (storage hiccup, say) stays for the next attempt.
+			if classify(err).status == http.StatusUnauthorized {
+				clearSession(c)
+			}
 			Fail(c, err)
 			return
 		}
