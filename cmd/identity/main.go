@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,8 +31,9 @@ import (
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/persistence/inmem"
-	"github.com/flarexio/identity/scep"
-	"github.com/flarexio/identity/transport/line"
+	"github.com/flarexio/identity/provider"
+	"github.com/flarexio/identity/token"
+	"github.com/flarexio/identity/user"
 
 	transHTTP "github.com/flarexio/identity/transport/http"
 	transPubSub "github.com/flarexio/identity/transport/pubsub"
@@ -125,6 +127,11 @@ func main() {
 				EnvVars: []string{"NATS_URL"},
 				Value:   "wss://nats.flarex.io",
 			},
+			&cli.BoolFlag{
+				Name:    "dev",
+				Usage:   "Human-readable debug logging",
+				EnvVars: []string{"IDENTITY_DEV"},
+			},
 		},
 		Action: run,
 	}
@@ -132,13 +139,45 @@ func main() {
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
 
-	time.Sleep(3000 * time.Millisecond)
+func newLogger(dev bool) (*zap.Logger, error) {
+	if dev {
+		return zap.NewDevelopment()
+	}
+
+	gin.SetMode(gin.ReleaseMode)
+	return zap.NewProduction()
+}
+
+func newProviders(cfg conf.Providers, passkeysSvc passkeys.Service) map[user.SocialProvider]identity.Provider {
+	providers := make(map[user.SocialProvider]identity.Provider)
+
+	if id := cfg.Google.Client.ID; id != "" {
+		providers[user.GOOGLE] = identity.Provider{
+			Verifier:      provider.Google(id),
+			OpensAccounts: true,
+		}
+	}
+
+	if ch := cfg.LINE.Channel; ch.ID != "" {
+		providers[user.LINE] = identity.Provider{
+			Verifier:      provider.LINE(ch.ID, ch.Secret),
+			OpensAccounts: true,
+		}
+	}
+
+	if passkeysSvc != nil {
+		providers[user.PASSKEYS] = identity.Provider{
+			Verifier: provider.Passkeys(passkeysSvc),
+		}
+	}
+
+	return providers
 }
 
 func run(cli *cli.Context) error {
-	err := conf.LoadEnv(cli)
-	if err != nil {
+	if err := conf.LoadEnv(cli); err != nil {
 		return err
 	}
 
@@ -148,7 +187,7 @@ func run(cli *cli.Context) error {
 	}
 	conf.ReplaceGlobals(cfg)
 
-	log, err := zap.NewDevelopment()
+	log, err := newLogger(cli.Bool("dev"))
 	if err != nil {
 		return err
 	}
@@ -156,7 +195,10 @@ func run(cli *cli.Context) error {
 
 	zap.ReplaceGlobals(log)
 
-	ctx := context.WithValue(context.Background(), model.Logger, log)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	ctx = context.WithValue(ctx, model.Logger, log)
 
 	// Add Persistence
 	repo, err := persistence.NewUserRepository(cfg.Persistence)
@@ -169,32 +211,39 @@ func run(cli *cli.Context) error {
 	}
 	defer repo.Close()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	// Add Service and Middlewares
 	passkeysSvc, err := passkeys.NewService(cfg.Providers.Passkeys)
 	if err != nil {
 		return err
 	}
 
-	svc := identity.NewService(repo, passkeysSvc, cfg.Providers)
+	var svc identity.Service
+	svc = identity.NewService(repo, newProviders(cfg.Providers, passkeysSvc), passkeysSvc)
 	svc = identity.LoggingMiddleware(log)(svc)
 
-	// Add Endpoints
-	endpoints := identity.EndpointSet{
-		// Register:         identity.RegisterEndpoint(svc),
-		SignIn:              identity.SignInEndpoint(svc),
-		OTPVerify:           identity.OTPVerifyEndpoint(svc),
-		AddSocialAccount:    identity.AddSocialAccountEndpoint(svc),
-		RemoveSocialAccount: identity.RemoveSocialAccountEndpoint(svc),
-		RegisterPasskey:     identity.RegisterPasskeyEndpoint(svc),
-		User:                identity.UserEndpoint(svc),
-		UserBySocialID:      identity.UserBySocialIDEndpoint(svc),
-		DeleteUser:          identity.DeleteUserEndpoint(svc),
+	var projection identity.EventHandler
+	projection = identity.NewEventHandler(repo)
+	projection = identity.EventLoggingMiddleware(log)(projection)
+
+	renew := cfg.JWT.Timeout
+	if cfg.JWT.Refresh.Enabled {
+		renew = cfg.JWT.Refresh.Maximum
 	}
 
-	// Add Transports
+	tokens, err := token.NewIssuer(token.Config{
+		Issuer:      cfg.BaseURL,
+		Audiences:   cfg.JWT.Audiences,
+		Key:         cfg.JWT.Privkey,
+		Lifetime:    cfg.JWT.Timeout,
+		RenewWindow: renew,
+		Admins:      cfg.JWT.Admins,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Add Endpoints
+	endpoints := identity.NewEndpointSet(svc, tokens)
 
 	// Add PubSub Transports and Event Sourcing
 	var ps pubsub.NATSPubSub
@@ -204,11 +253,11 @@ func run(cli *cli.Context) error {
 			zap.String("provider", cfg.EventBus.Provider.String()),
 		)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		natsURL := cli.String("nats")
-		creds := conf.Path + "/user.creds"
+		creds := filepath.Join(conf.Path, "user.creds")
 
 		natsPS, err := pubsub.NewNATSPubSub(natsURL, cfg.Name, creds)
 		if err != nil {
@@ -237,10 +286,13 @@ func run(cli *cli.Context) error {
 
 		// Add Event Sourcing
 		// SUB users.>
-		endpoint := identity.EventEndpoint(svc)
-		handler := transPubSub.EventHandler(endpoint)
+		endpoint := identity.EventEndpoint(projection)
+		handler := transPubSub.EventHandler(endpoint, log)
 
-		natsPS.PullConsume(consumer, handler)
+		if err := natsPS.PullConsume(consumer, handler); err != nil {
+			log.Error(err.Error())
+			return err
+		}
 
 		ps = natsPS
 	}
@@ -270,162 +322,124 @@ func run(cli *cli.Context) error {
 	}
 
 	// Add HTTP Transport
-	r := gin.Default()
-
-	// GET /.well-known/jwks.json
-	r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
-
-	// GET /.well-known/webauthn
-	r.GET("/.well-known/webauthn", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"origins": cfg.Providers.Passkeys.Origins})
-	})
-
-	transHTTP.Init(
-		cfg.BaseURL,          // issuer
-		cfg.JWT.Audiences[0], // audience
-		cfg.JWT.Privkey,      // ed25519 private key
-	)
-
 	permissionsPath := filepath.Join(conf.Path, "permissions.json")
-	policy, err := policy.NewRegoPolicy(ctx, permissionsPath)
+	rbac, err := policy.NewRegoPolicy(ctx, permissionsPath)
 	if err != nil {
 		return err
 	}
 
-	auth := transHTTP.Authorizator(policy)
-
-	if provider := cfg.Providers.LINE; provider.Channel.ID != "" {
-		line.SetConfig(provider)
-
-		// GET /auth/line
-		r.GET("/auth/line", line.LoginAuthURLHandler(line.SignIn))
-
-		// GET /auth/line/callback
-		r.GET("/auth/line/callback",
-			line.AuthCallback(endpoints.SignIn, endpoints.AddSocialAccount))
-
-		// GET /auth/line/link/:user
-		r.GET("/auth/line/link/:user",
-			auth("identity::users.update", transHTTP.Owner),
-			line.LoginAuthURLHandler(line.LinkAccount))
+	webDir := cfg.HTTP.Web
+	if webDir == "" {
+		webDir = filepath.Join(conf.Path, "web")
+	}
+	webDir, hasWeb := transHTTP.FrontendDir(webDir)
+	if hasWeb {
+		log.Info("serving frontend", zap.String("dir", webDir))
 	}
 
-	apiV1 := r.Group("/identity/v1")
-	{
-		// PATCH /signin
-		apiV1.PATCH("/signin", transHTTP.SignInHandler(endpoints.SignIn))
-
-		// POST /users
-		// apiV1.POST("/users", transHTTP.RegisterHandler(endpoints.Register))
-
-		// PATCH /users/:user/verify
-		apiV1.POST("/users/:user/verify",
-			auth("identity::users.update", transHTTP.Owner),
-			transHTTP.OTPVerifyHandler(endpoints.OTPVerify))
-
-		// PUT /users/:user/socials
-		apiV1.PUT("/users/:user/socials",
-			auth("identity::users.update", transHTTP.Owner),
-			transHTTP.AddSocialAccountHandler(endpoints.AddSocialAccount))
-
-		// DELETE /users/:user/socials
-		apiV1.DELETE("/users/:user/socials",
-			auth("identity::users.update", transHTTP.Owner),
-			transHTTP.RemoveSocialAccountHandler(endpoints.RemoveSocialAccount))
-
-		// POST /users/:user/passkeys/register
-		apiV1.POST("/users/:user/passkeys/register",
-			auth("identity::users.update", transHTTP.Owner),
-			transHTTP.RegisterPasskeyHandler(endpoints.RegisterPasskey))
-
-		// GET /users/:user
-		apiV1.GET("/users/:user",
-			auth("identity::users.get", transHTTP.Owner),
-			transHTTP.UserHandler(endpoints.User))
-
-		// DELETE /users/:user
-		apiV1.DELETE("/users/:user",
-			auth("identity::users.delete", transHTTP.Owner),
-			transHTTP.DeleteUserHandler(endpoints.DeleteUser))
-
-		// PATCH /token/refresh
-		apiV1.PATCH("/token/refresh", transHTTP.RefreshHandler)
-
-		// POST /passkeys/registration
-		{
-			endpoint := passkeys.FinalizeRegistrationEndpoint(passkeysSvc)
-			apiV1.POST("/passkeys/registration", passkeys.FinalizeRegistrationHandler(endpoint))
-		}
+	s := &server{
+		cfg:       cfg,
+		log:       log,
+		endpoints: endpoints,
+		tokens:    tokens,
+		policy:    rbac,
+		passkeys:  passkeysSvc,
+		webDir:    webDir,
 	}
 
-	go r.Run(":" + strconv.Itoa(conf.Port))
+	router, err := s.publicRouter()
+	if err != nil {
+		return err
+	}
+
+	errc := make(chan error, 2)
+	servers := []*http.Server{newHTTPServer(":"+strconv.Itoa(conf.Port), router)}
+
+	go func() {
+		log.Info("listening", zap.String("addr", servers[0].Addr))
+		errc <- servers[0].ListenAndServe()
+	}()
 
 	// Run mTLS server
 	if cli.Bool("mtls-enabled") {
-		r := gin.Default()
-		r.GET("/.well-known/jwks.json", transHTTP.JWKHandler)
-
-		requireClientOU := transHTTP.RequireClientOU(cfg.MTLS.AllowedOUs)
-		r.GET("/users/:subject", requireClientOU,
-			transHTTP.DirectUserBySocialIDHandler(endpoints.UserBySocialID))
-
 		challenges, err := inmem.NewChallengeStore()
 		if err != nil {
 			return err
 		}
 		defer challenges.Close()
 
-		scepSvc := scep.NewService(challenges, 0)
-
-		// POST /scep/challenge/generate
-		{
-			endpoint := scep.GenerateEndpoint(scepSvc)
-			r.POST("/scep/challenge/generate", transHTTP.SCEPGenerateHandler(endpoint))
+		router, err := s.mtlsRouter(challenges)
+		if err != nil {
+			return err
 		}
 
-		// POST /scep/challenge/verify
-		{
-			endpoint := scep.VerifyEndpoint(scepSvc)
-			r.POST("/scep/challenge/verify", transHTTP.SCEPVerifyHandler(endpoint))
+		certs := filepath.Join(conf.Path, "certs")
+
+		srv, err := newMTLSServer(fmt.Sprintf(":%d", cli.Int("mtls-port")), router, filepath.Join(certs, "ca.crt"))
+		if err != nil {
+			return err
 		}
+		servers = append(servers, srv)
 
-		addr := fmt.Sprintf(":%d", cli.Int("mtls-port"))
-
-		certFile := conf.Path + "/certs/server.crt"
-		keyFile := conf.Path + "/certs/server.key"
-		caFile := conf.Path + "/certs/ca.crt"
-
-		go runMTLSServer(r, addr, certFile, keyFile, caFile)
+		go func() {
+			log.Info("listening (mTLS)", zap.String("addr", srv.Addr))
+			errc <- srv.ListenAndServeTLS(filepath.Join(certs, "server.crt"), filepath.Join(certs, "server.key"))
+		}()
 	}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-ctx.Done():
+		log.Info("shutting down")
+	case err := <-errc:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Error("server failed", zap.Error(err))
+			shutdown(servers)
+			return err
+		}
+	}
 
-	sign := <-quit
-
-	log.Info("shutdown", zap.String("singal", sign.String()))
+	shutdown(servers)
 	return nil
 }
 
-// 啟動 mTLS 的 Gin server
-func runMTLSServer(router http.Handler, addr, certFile, keyFile, caFile string) error {
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    32 << 10,
+	}
+}
+
+func newMTLSServer(addr string, handler http.Handler, caFile string) (*http.Server, error) {
 	caCert, err := os.ReadFile(caFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	server := &http.Server{
-		Addr:    addr,
-		Handler: router,
-		TLSConfig: &tls.Config{
-			ClientCAs:  caCertPool,
-			ClientAuth: tls.RequireAndVerifyClientCert,
-			MinVersion: tls.VersionTLS12,
-		},
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("%s: no certificates", caFile)
 	}
 
-	return server.ListenAndServeTLS(certFile, keyFile)
+	srv := newHTTPServer(addr, handler)
+	srv.TLSConfig = &tls.Config{
+		ClientCAs:  pool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
+	}
+
+	return srv, nil
+}
+
+func shutdown(servers []*http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, srv := range servers {
+		srv.Shutdown(ctx)
+	}
 }

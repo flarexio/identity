@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-kit/kit/endpoint"
@@ -15,6 +16,22 @@ import (
 
 	"github.com/flarexio/identity/conf"
 )
+
+const maxSCEPSubject = 64 // the X.509 upper bound for a CommonName
+
+func validSCEPSubject(s string) bool {
+	if s == "" || len(s) > maxSCEPSubject {
+		return false
+	}
+
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+
+	return true
+}
 
 type scepGenerateRequest struct {
 	Subject string `json:"subject"`
@@ -29,26 +46,19 @@ type scepWebhookRequest struct {
 func SCEPGenerateHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req scepGenerateRequest
-		if err := c.ShouldBind(&req); err != nil {
-			c.String(http.StatusBadRequest, err.Error())
-			c.Error(err)
-			c.Abort()
+		if err := c.ShouldBindJSON(&req); err != nil {
+			badRequest(c, err)
 			return
 		}
 
-		if req.Subject == "" {
-			err := errors.New("subject required")
-			c.String(http.StatusBadRequest, err.Error())
-			c.Error(err)
-			c.Abort()
+		if !validSCEPSubject(req.Subject) {
+			badRequest(c, errors.New("invalid subject"))
 			return
 		}
 
 		challenge, err := ep(c.Request.Context(), req.Subject)
 		if err != nil {
-			c.String(http.StatusExpectationFailed, err.Error())
-			c.Error(err)
-			c.Abort()
+			Fail(c, err)
 			return
 		}
 
@@ -58,65 +68,53 @@ func SCEPGenerateHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 
 // SCEPVerifyHandler serves StepCA's SCEPCHALLENGE webhook, authenticated by HMAC
 // over the raw body, and answers {"allow": bool}.
-func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
+func SCEPVerifyHandler(ep endpoint.Endpoint, cfg conf.SCEP, log *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := conf.G().SCEP
-
 		// The mTLS layer already verified this cert against ClientCAs, so its
 		// Subject/Issuer are trustworthy; pin them to StepCA's leaf.
-		if tls := c.Request.TLS; tls != nil && len(tls.PeerCertificates) > 0 {
-			peer := tls.PeerCertificates[0]
-			zap.L().Info("scep webhook client cert",
+		tls := c.Request.TLS
+		if tls == nil || len(tls.PeerCertificates) == 0 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{"client_certificate_required", "client certificate required"})
+			return
+		}
+
+		if peer := tls.PeerCertificates[0]; cfg.WebhookClientCN != "" && peer.Subject.CommonName != cfg.WebhookClientCN {
+			log.Warn("unexpected scep webhook client certificate",
 				zap.String("subject", peer.Subject.String()),
 				zap.String("issuer", peer.Issuer.String()),
 			)
-
-			if cfg.WebhookClientCN != "" && peer.Subject.CommonName != cfg.WebhookClientCN {
-				err := errors.New("unexpected webhook client certificate")
-				c.String(http.StatusUnauthorized, err.Error())
-				c.Error(err)
-				c.Abort()
-				return
-			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{"client_certificate_forbidden", "unexpected webhook client certificate"})
+			return
 		}
 
 		// id is public and unsigned: a cheap fail-fast, not the gate.
 		if cfg.WebhookID != "" && c.GetHeader("X-Smallstep-Webhook-Id") != cfg.WebhookID {
-			err := errors.New("unexpected webhook id")
-			c.String(http.StatusBadRequest, err.Error())
-			c.Error(err)
-			c.Abort()
+			badRequest(c, errors.New("unexpected webhook id"))
 			return
 		}
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.String(http.StatusBadRequest, err.Error())
-			c.Error(err)
-			c.Abort()
+			badRequest(c, err)
 			return
 		}
 
 		if !validSCEPSignature(c.GetHeader("X-Smallstep-Signature"), body, cfg.WebhookSecret) {
-			err := errors.New("invalid webhook signature")
-			c.String(http.StatusUnauthorized, err.Error())
-			c.Error(err)
-			c.Abort()
+			c.Error(errors.New("invalid webhook signature"))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{"invalid_signature", "invalid webhook signature"})
 			return
 		}
 
 		var req scepWebhookRequest
 		if err := json.Unmarshal(body, &req); err != nil {
-			c.String(http.StatusBadRequest, err.Error())
-			c.Error(err)
-			c.Abort()
+			badRequest(c, err)
 			return
 		}
 
 		// A denied challenge is a normal 200 with allow:false, not an HTTP error.
 		subject, err := ep(c.Request.Context(), req.SCEPChallenge)
 		if err != nil {
-			zap.L().Warn("scep challenge denied",
+			log.Warn("scep challenge denied",
 				zap.String("transaction", req.SCEPTransactionID),
 				zap.Error(err),
 			)
@@ -124,7 +122,7 @@ func SCEPVerifyHandler(ep endpoint.Endpoint) gin.HandlerFunc {
 			return
 		}
 
-		zap.L().Info("scep challenge allowed",
+		log.Info("scep challenge allowed",
 			zap.String("transaction", req.SCEPTransactionID),
 			zap.Any("subject", subject),
 		)

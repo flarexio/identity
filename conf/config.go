@@ -1,12 +1,18 @@
 package conf
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/netip"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/oklog/ulid/v2"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v3"
 
@@ -48,13 +54,17 @@ func LoadEnv(cli *cli.Context) error {
 	return nil
 }
 
+// LoadConfig reads $IDENTITY_PATH/config.yaml. There is deliberately no
+// fallback to config.example.yaml: its keys are public, and a service that
+// signs tokens with them would accept forgeries from anyone.
 func LoadConfig() (*Config, error) {
-	f, err := os.Open(Path + "/config.yaml")
+	return LoadConfigFile(filepath.Join(Path, "config.yaml"))
+}
+
+func LoadConfigFile(name string) (*Config, error) {
+	f, err := os.Open(name)
 	if err != nil {
-		f, err = os.Open(Path + "/config.example.yaml")
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("open config (copy config.example.yaml and replace its keys): %w", err)
 	}
 	defer f.Close()
 
@@ -62,10 +72,26 @@ func LoadConfig() (*Config, error) {
 
 	var cfg *Config
 	if err := yaml.NewDecoder(r).Decode(&cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 
 	return cfg, nil
+}
+
+func (cfg *Config) Validate() error {
+	if cfg.BaseURL == "" {
+		return errors.New("baseUrl is required")
+	}
+
+	if len(cfg.JWT.Audiences) == 0 {
+		return errors.New("jwt.audiences needs at least one entry")
+	}
+
+	return nil
 }
 
 type Config struct {
@@ -76,6 +102,7 @@ type Config struct {
 	Persistence Persistence `yaml:"persistence"`
 	EventBus    EventBus    `yaml:"eventBus"`
 	Providers   Providers   `yaml:"providers"`
+	HTTP        HTTP        `yaml:"http"`
 	MTLS        MTLS        `yaml:"mtls"`
 	Test        Test        `yaml:"test"`
 }
@@ -87,15 +114,33 @@ type MTLS struct {
 	AllowedOUs []string `yaml:"allowedOUs"`
 }
 
+// HTTP configures the public listener.
+type HTTP struct {
+	// Proxies whose X-Forwarded-For is believed when working out the client
+	// address (for rate limiting and logs). Empty means trust none.
+	TrustedProxies []netip.Prefix `yaml:"trustedProxies"`
+
+	// Directory holding the built frontend; empty means $IDENTITY_PATH/web.
+	// The frontend is served only if the directory exists.
+	Web string `yaml:"web"`
+}
+
 type JWT struct {
 	Privkey ed25519.PrivateKey
 	Timeout time.Duration
 	Refresh struct {
 		Enabled bool
+
+		// How long after the user last actually authenticated tokens may
+		// still be renewed, whether by refresh or by the browser session.
 		Maximum time.Duration
 	}
 	Audiences []string
-	Admins    []string // usernames granted the "admin" role in their token
+
+	// User IDs (not usernames) granted the "admin" role. Usernames are
+	// derived from e-mail addresses and are freed when an account is
+	// deleted, so anyone could end up holding one.
+	Admins []string
 }
 
 func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
@@ -121,6 +166,15 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 
 	if len(priv) != ed25519.PrivateKeySize {
 		return errors.New("invalid ed25519 private key length")
+	}
+
+	seed := priv[:ed25519.SeedSize]
+	if isZero(seed) {
+		return errors.New("jwt.privkey is the placeholder from config.example.yaml; run `identity genkey`")
+	}
+
+	if !bytes.Equal(ed25519.NewKeyFromSeed(seed), priv) {
+		return errors.New("jwt.privkey: public half does not match the seed")
 	}
 
 	cfg.Privkey = ed25519.PrivateKey(priv)
@@ -153,10 +207,24 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 
+	if cfg.Refresh.Enabled && cfg.Refresh.Maximum < cfg.Timeout {
+		return errors.New("jwt.refresh.maximum must not be shorter than jwt.timeout")
+	}
+
+	for _, admin := range raw.Admins {
+		if _, err := ulid.ParseStrict(admin); err != nil {
+			return fmt.Errorf("jwt.admins: %q is not a user ID (admins are listed by ID, not username)", admin)
+		}
+	}
+
 	cfg.Audiences = raw.Audiences
 	cfg.Admins = raw.Admins
 
 	return nil
+}
+
+func isZero(b []byte) bool {
+	return subtle.ConstantTimeCompare(b, make([]byte, len(b))) == 1
 }
 
 // SCEP holds the StepCA SCEPCHALLENGE webhook settings.
@@ -187,6 +255,10 @@ func (cfg *SCEP) UnmarshalYAML(value *yaml.Node) error {
 	secret, err := base64.StdEncoding.DecodeString(raw.WebhookSecret)
 	if err != nil {
 		return err
+	}
+
+	if len(secret) < 32 || isZero(secret) {
+		return errors.New("scep: webhookSecret must be at least 32 random bytes")
 	}
 
 	cfg.WebhookSecret = secret

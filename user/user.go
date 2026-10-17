@@ -13,7 +13,11 @@ import (
 )
 
 var (
-	ErrUserNotFound = errors.New("user not found")
+	ErrUserNotFound          = errors.New("user not found")
+	ErrSocialAccountExists   = errors.New("social account already exists")
+	ErrSocialAccountNotFound = errors.New("social account not found")
+	ErrLastSocialAccount     = errors.New("cannot remove the last social account")
+	ErrUsernameTaken         = errors.New("username taken")
 )
 
 type Status int
@@ -61,7 +65,7 @@ func (s Status) String() string {
 	}
 }
 
-func (s *Status) MarshalJSON() ([]byte, error) {
+func (s Status) MarshalJSON() ([]byte, error) {
 	jsonStr := `"` + s.String() + `"`
 	return []byte(jsonStr), nil
 }
@@ -108,7 +112,7 @@ func (id UserID) Time() time.Time {
 	return ulid.Time(ms)
 }
 
-func (id *UserID) MarshalJSON() ([]byte, error) {
+func (id UserID) MarshalJSON() ([]byte, error) {
 	jsonStr := `"` + id.String() + `"`
 	return []byte(jsonStr), nil
 }
@@ -187,9 +191,14 @@ func (u *User) Delete() {
 	u.AddEvent(e)
 }
 
+// Active reports whether the user may sign in and be issued tokens.
+func (u *User) Active() bool {
+	return u.Status == Activated
+}
+
 func (u *User) AddSocialAccount(provider SocialProvider, socialID SocialID) error {
 	if u.HasSocialAccount(provider, socialID) {
-		return errors.New("social account already exists")
+		return ErrSocialAccountExists
 	}
 
 	account := NewSocialAccount(provider, socialID)
@@ -202,7 +211,17 @@ func (u *User) AddSocialAccount(provider SocialProvider, socialID SocialID) erro
 	return nil
 }
 
+// RemoveSocialAccount unlinks an account. A user always keeps at least one,
+// since an account with none left could never be signed in to again.
 func (u *User) RemoveSocialAccount(provider SocialProvider, socialID SocialID) error {
+	if !u.HasSocialAccount(provider, socialID) {
+		return ErrSocialAccountNotFound
+	}
+
+	if len(u.Accounts) <= 1 {
+		return ErrLastSocialAccount
+	}
+
 	var accounts []*SocialAccount
 	for _, a := range u.Accounts {
 		if a.Provider == provider && a.SocialID == socialID {
@@ -212,10 +231,6 @@ func (u *User) RemoveSocialAccount(provider SocialProvider, socialID SocialID) e
 		}
 
 		accounts = append(accounts, a)
-	}
-
-	if len(accounts) == len(u.Accounts) {
-		return errors.New("social account not found")
 	}
 
 	u.Accounts = accounts
@@ -260,6 +275,19 @@ func (u *User) SocialID(provider SocialProvider) (SocialID, bool) {
 	}
 
 	return "", false
+}
+
+// Clone returns a deep copy without the pending events, so a repository can
+// hand out users that callers may mutate freely.
+func (u *User) Clone() *User {
+	c := *u
+	c.Accounts = make([]*SocialAccount, len(u.Accounts))
+	for i, a := range u.Accounts {
+		account := *a
+		c.Accounts[i] = &account
+	}
+	c.EventStore = events.NewEventStore()
+	return &c
 }
 
 func NewSocialAccount(provider SocialProvider, id SocialID) *SocialAccount {
