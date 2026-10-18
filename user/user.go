@@ -222,6 +222,10 @@ func (u *User) RemoveSocialAccount(provider SocialProvider, socialID SocialID) e
 		return ErrLastSocialAccount
 	}
 
+	// Stamp before building the event: it takes its time from UpdatedAt,
+	// and the projection orders events by it.
+	u.UpdatedAt = time.Now()
+
 	var accounts []*SocialAccount
 	for _, a := range u.Accounts {
 		if a.Provider == provider && a.SocialID == socialID {
@@ -234,7 +238,6 @@ func (u *User) RemoveSocialAccount(provider SocialProvider, socialID SocialID) e
 	}
 
 	u.Accounts = accounts
-	u.UpdatedAt = time.Now()
 
 	return nil
 }

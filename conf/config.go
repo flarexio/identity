@@ -159,25 +159,12 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
-	priv, err := base64.StdEncoding.DecodeString(raw.Privkey)
+	priv, err := parsePrivateKey("jwt.privkey", raw.Privkey)
 	if err != nil {
 		return err
 	}
 
-	if len(priv) != ed25519.PrivateKeySize {
-		return errors.New("invalid ed25519 private key length")
-	}
-
-	seed := priv[:ed25519.SeedSize]
-	if isZero(seed) {
-		return errors.New("jwt.privkey is the placeholder from config.example.yaml; run `identity genkey`")
-	}
-
-	if !bytes.Equal(ed25519.NewKeyFromSeed(seed), priv) {
-		return errors.New("jwt.privkey: public half does not match the seed")
-	}
-
-	cfg.Privkey = ed25519.PrivateKey(priv)
+	cfg.Privkey = priv
 
 	if raw.Timeout == "" {
 		cfg.Timeout = 1 * time.Hour
@@ -221,6 +208,30 @@ func (cfg *JWT) UnmarshalYAML(value *yaml.Node) error {
 	cfg.Admins = raw.Admins
 
 	return nil
+}
+
+// parsePrivateKey decodes a base64 ed25519 private key as `identity genkey`
+// prints it, refusing the placeholders in config.example.yaml.
+func parsePrivateKey(field, encoded string) (ed25519.PrivateKey, error) {
+	priv, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+
+	if len(priv) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("%s: invalid ed25519 private key length", field)
+	}
+
+	seed := priv[:ed25519.SeedSize]
+	if isZero(seed) {
+		return nil, fmt.Errorf("%s is the placeholder from config.example.yaml; run `identity genkey`", field)
+	}
+
+	if !bytes.Equal(ed25519.NewKeyFromSeed(seed), priv) {
+		return nil, fmt.Errorf("%s: public half does not match the seed", field)
+	}
+
+	return ed25519.PrivateKey(priv), nil
 }
 
 func isZero(b []byte) bool {
@@ -370,12 +381,34 @@ func (p TransportProvider) String() string {
 type EventBus struct {
 	Provider TransportProvider
 	Users    pubsub.StreamConsumer
+	Signing  EventSigning
+}
+
+// EventSigning keys the signatures on published user events.
+type EventSigning struct {
+	// Signs every event this instance publishes. All instances sharing a
+	// stream need the same key, or each other's public keys in Trusted.
+	Key ed25519.PrivateKey
+
+	// More public keys whose events are accepted: previous keys while
+	// rotating, so that history signed with them still replays.
+	Trusted []ed25519.PublicKey
+
+	// Accept events with no signature. Only for replaying history from
+	// before events were signed into a fresh instance; it re-opens the hole
+	// signing closes, so turn it off again once caught up.
+	AllowUnsigned bool
 }
 
 func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
 		Provider string                `yaml:"provider"`
 		Users    pubsub.StreamConsumer `yaml:"users"`
+		Signing  struct {
+			Key           string   `yaml:"key"`
+			Trusted       []string `yaml:"trusted"`
+			AllowUnsigned bool     `yaml:"allowUnsigned"`
+		} `yaml:"signing"`
 	}
 
 	if err := value.Decode(&raw); err != nil {
@@ -387,10 +420,34 @@ func (e *EventBus) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
+	key, err := parsePrivateKey("eventBus.signing.key", raw.Signing.Key)
+	if err != nil {
+		return err
+	}
+
+	trusted := make([]ed25519.PublicKey, len(raw.Signing.Trusted))
+	for i, s := range raw.Signing.Trusted {
+		pub, err := base64.StdEncoding.DecodeString(s)
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			return fmt.Errorf("eventBus.signing.trusted[%d]: not a base64 ed25519 public key", i)
+		}
+		trusted[i] = ed25519.PublicKey(pub)
+	}
+
 	e.Provider = provider
 	e.Users = raw.Users
+	e.Signing = EventSigning{
+		Key:           key,
+		Trusted:       trusted,
+		AllowUnsigned: raw.Signing.AllowUnsigned,
+	}
 
 	return nil
+}
+
+// PublicKeys returns every key whose signatures are accepted.
+func (s EventSigning) PublicKeys() []ed25519.PublicKey {
+	return append([]ed25519.PublicKey{s.Key.Public().(ed25519.PublicKey)}, s.Trusted...)
 }
 
 type Providers struct {

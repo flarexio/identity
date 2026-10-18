@@ -63,6 +63,7 @@ The browser never stores a bearer token: signing in sets an HttpOnly, `SameSite=
 ## Upgrading
 
 - **`jwt.admins` now lists user IDs**, not usernames. Usernames are derived from e-mail addresses and freed when an account is deleted, so a username could end up with someone else. Startup fails until entries are user IDs.
+- **User events are signed.** Add `eventBus.signing.key` (generate with `identity genkey`; use a different key from `jwt.privkey`), the same key on every instance consuming the stream. Unsigned events are ignored. Events already in the stream from before the upgrade are unsigned: an existing instance has applied them already, so this changes nothing for it. To build a fresh instance from that history, start it once with `eventBus.signing.allowUnsigned: true` until it has caught up, then turn it off. To rotate the key, move the old public key into `eventBus.signing.trusted`.
 - **No fallback to `config.example.yaml`**, and its placeholder signing key is rejected. Anyone can sign tokens with a key published in this repository.
 - **Badger stores are migrated on first start** to a layout where unlinked social accounts really stop resolving. Back up the data directory first.
 - **Social accounts are looked up per provider.** The mTLS `GET /users/:subject` accepts `?provider=`; without it the ID must be unique across providers.

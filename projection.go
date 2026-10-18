@@ -10,6 +10,10 @@ import (
 // EventHandler projects user events into the repository. Commands only
 // publish events; this is where they are written down. JetStream delivers at
 // least once, so every handler must be safe to run twice.
+//
+// An event never applies to a user whose state is newer than the event.
+// Besides redeliveries, that stops replays: re-publishing a genuine, signed
+// "account linked" event after the account was unlinked changes nothing.
 type EventHandler interface {
 	UserRegisteredHandler(ctx context.Context, e *user.UserRegisteredEvent) error
 	UserActivatedHandler(ctx context.Context, e *user.UserActivatedEvent) error
@@ -28,6 +32,20 @@ type projection struct {
 	users user.Repository
 }
 
+// current loads the user an event applies to, refusing stale events.
+func (p *projection) current(e *user.Event) (*user.User, error) {
+	u, err := p.users.Find(e.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	if e.OccuredAt.Before(u.UpdatedAt) {
+		return nil, ErrStaleEvent
+	}
+
+	return u, nil
+}
+
 func (p *projection) UserRegisteredHandler(ctx context.Context, e *user.UserRegisteredEvent) error {
 	if _, err := p.users.Find(e.UserID); err == nil {
 		return nil // redelivered
@@ -39,7 +57,7 @@ func (p *projection) UserRegisteredHandler(ctx context.Context, e *user.UserRegi
 }
 
 func (p *projection) UserActivatedHandler(ctx context.Context, e *user.UserActivatedEvent) error {
-	u, err := p.users.Find(e.UserID)
+	u, err := p.current(e.Event)
 	if err != nil {
 		return err
 	}
@@ -51,7 +69,7 @@ func (p *projection) UserActivatedHandler(ctx context.Context, e *user.UserActiv
 }
 
 func (p *projection) UserSocialAccountAddedHandler(ctx context.Context, e *user.UserSocialAccountAddedEvent) error {
-	u, err := p.users.Find(e.UserID)
+	u, err := p.current(e.Event)
 	if err != nil {
 		return err
 	}
@@ -68,7 +86,7 @@ func (p *projection) UserSocialAccountAddedHandler(ctx context.Context, e *user.
 }
 
 func (p *projection) UserSocialAccountRemovedHandler(ctx context.Context, e *user.UserSocialAccountRemovedEvent) error {
-	u, err := p.users.Find(e.UserID)
+	u, err := p.current(e.Event)
 	if err != nil {
 		return err
 	}
@@ -89,7 +107,7 @@ func (p *projection) UserSocialAccountRemovedHandler(ctx context.Context, e *use
 }
 
 func (p *projection) UserDeletedHandler(ctx context.Context, e *user.UserDeletedEvent) error {
-	u, err := p.users.Find(e.UserID)
+	u, err := p.current(e.Event)
 	if errors.Is(err, user.ErrUserNotFound) {
 		return nil // redelivered
 	}

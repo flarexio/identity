@@ -44,6 +44,13 @@ eventBus:
         {
           "ack_policy": "explicit"
         }
+  signing:
+    # Signs published user events; only signed events are applied, so that
+    # nothing else with access to users.> can rewrite accounts.
+    # Placeholder: identity refuses to start with it. Run `identity genkey`.
+    key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+    trusted: []           # public keys still accepted (previous keys while rotating)
+    allowUnsigned: false  # only to replay pre-signing history into a fresh instance
 
 providers:
   google:

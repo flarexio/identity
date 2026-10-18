@@ -12,16 +12,31 @@ import (
 
 	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
+	"github.com/flarexio/identity/eventsig"
 	"github.com/flarexio/identity/user"
 )
 
-// EventHandler feeds users.> events to the projection. Returning an error
-// leaves the message unacknowledged so JetStream redelivers it; that is
-// right for a storage hiccup but would loop forever on an event that can
-// never apply, so those are logged and acknowledged instead.
-func EventHandler(endpoint endpoint.Endpoint, log *zap.Logger) pubsub.MessageHandler {
+// EventHandler feeds users.> events to the projection. Only events signed
+// by a key verifier trusts are applied; with allowUnsigned, events without
+// any signature are too (see conf.EventSigning).
+//
+// Returning an error leaves the message unacknowledged so JetStream
+// redelivers it; that is right for a storage hiccup but would loop forever
+// on an event that can never apply, so those are logged and acknowledged.
+func EventHandler(endpoint endpoint.Endpoint, verifier *eventsig.Verifier, allowUnsigned bool, log *zap.Logger) pubsub.MessageHandler {
 	return func(ctx context.Context, msg *pubsub.Message) error {
-		event, err := decodeEvent(msg)
+		payload, err := verifier.Verify(msg.Topic, msg.Data)
+		switch {
+		case err == nil:
+		case errors.Is(err, eventsig.ErrUnsigned) && allowUnsigned:
+			log.Warn("applying unsigned event (eventBus.signing.allowUnsigned)", zap.String("topic", msg.Topic))
+			payload = msg.Data
+		default:
+			log.Error("dropping event that is not signed by identity", zap.String("topic", msg.Topic), zap.Error(err))
+			return nil
+		}
+
+		event, err := decodeEvent(&pubsub.Message{Topic: msg.Topic, Data: payload})
 		if err != nil {
 			log.Error("dropping undecodable event", zap.String("topic", msg.Topic), zap.Error(err))
 			return nil
@@ -38,7 +53,8 @@ func EventHandler(endpoint endpoint.Endpoint, log *zap.Logger) pubsub.MessageHan
 }
 
 func permanent(err error) bool {
-	return errors.Is(err, user.ErrUserNotFound) ||
+	return errors.Is(err, identity.ErrStaleEvent) ||
+		errors.Is(err, user.ErrUserNotFound) ||
 		errors.Is(err, user.ErrUsernameTaken) ||
 		errors.Is(err, user.ErrSocialAccountExists)
 }

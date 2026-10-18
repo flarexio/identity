@@ -32,7 +32,7 @@ func TestLoadConfig(t *testing.T) {
 
 	cfg := strings.Replace(string(example),
 		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-		base64.StdEncoding.EncodeToString(priv), 1)
+		base64.StdEncoding.EncodeToString(priv), -1)
 	cfg = strings.Replace(cfg,
 		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 		base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")), 1)
@@ -53,6 +53,9 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "users", c.Persistence.Name)
 	require.Len(t, c.HTTP.TrustedProxies, 1)
 	assert.Equal(t, "10.0.0.0/8", c.HTTP.TrustedProxies[0].String())
+	assert.Equal(t, priv, c.EventBus.Signing.Key)
+	assert.False(t, c.EventBus.Signing.AllowUnsigned)
+	assert.Len(t, c.EventBus.Signing.PublicKeys(), 1)
 }
 
 func TestJWTValidation(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/eventsig"
 	"github.com/flarexio/identity/persistence/inmem"
 	"github.com/flarexio/identity/provider"
 	"github.com/flarexio/identity/token"
@@ -35,12 +36,14 @@ import (
 )
 
 // syncBus projects events as they are published, so a test can read what a
-// command wrote straight away.
+// command wrote straight away. It keeps what went over the wire, for replay.
 type syncBus struct {
 	handler pubsub.MessageHandler
+	sent    []pubsub.Message
 }
 
 func (b *syncBus) Publish(topic string, data []byte) error {
+	b.sent = append(b.sent, pubsub.Message{Topic: topic, Data: data})
 	return b.handler(context.Background(), &pubsub.Message{Topic: topic, Data: data})
 }
 
@@ -61,6 +64,7 @@ func fakeVerifier() provider.Verifier {
 
 type identityTestSuite struct {
 	suite.Suite
+	bus    *syncBus
 	users  user.Repository
 	tokens *token.Issuer
 	server *server
@@ -75,8 +79,13 @@ func (s *identityTestSuite) SetupTest() {
 	users, err := inmem.NewUserRepository()
 	s.Require().NoError(err)
 
+	eventPub, eventKey, err := ed25519.GenerateKey(nil)
+	s.Require().NoError(err)
+
 	var projection identity.EventHandler = identity.NewEventHandler(users)
-	events.ReplaceGlobals(&syncBus{transPubSub.EventHandler(identity.EventEndpoint(projection), log)})
+	s.bus = &syncBus{handler: transPubSub.EventHandler(identity.EventEndpoint(projection),
+		eventsig.NewVerifier(eventPub), false, log)}
+	events.ReplaceGlobals(eventsig.Publisher(s.bus, eventsig.NewSigner(eventKey)))
 
 	providers := map[user.SocialProvider]identity.Provider{
 		user.GOOGLE:   {Verifier: fakeVerifier(), OpensAccounts: true},
@@ -531,6 +540,47 @@ func (s *identityTestSuite) TestLINEFlowIsBoundToTheBrowser() {
 	state, c = start()
 	s.Equal("/login?error=line_cancelled", callback(url.Values{"state": {state}, "error": {"access_denied"}}, c))
 	s.Equal("/login?error=line_failed", callback(url.Values{"state": {state}, "error": {"access_denied"}}, c))
+}
+
+// Whoever can publish to users.> without identity's signing key cannot
+// change accounts: not with a forged event, not by replaying a genuine one,
+// and not by moving a genuine one to another user's subject.
+func (s *identityTestSuite) TestEventBusAttacks() {
+	alice, _ := s.signIn(user.GOOGLE, "g-1|alice@example.com")
+	bob, _ := s.signIn(user.GOOGLE, "g-2|bob@example.com")
+	auth := alice.Token.Token
+
+	linked := func(id user.UserID, p user.SocialProvider, socialID user.SocialID) bool {
+		u, err := s.users.Find(id)
+		s.Require().NoError(err)
+		return u.HasSocialAccount(p, socialID)
+	}
+
+	// Forged: link the attacker's Google account to alice.
+	forged := user.NewUserSocialAccountAddedEvent(alice.User, user.NewSocialAccount(user.GOOGLE, "g-attacker"))
+	data, err := json.Marshal(forged)
+	s.Require().NoError(err)
+	s.Require().NoError(s.bus.Publish(forged.Topic(), data))
+	s.False(linked(alice.User.ID, user.GOOGLE, "g-attacker"), "unsigned event applied")
+
+	// Replayed: alice links LINE, unlinks it, and the old event is resent.
+	w := s.do(request{method: "PUT", path: "/identity/v1/users/alice/socials", bearer: auth,
+		body: map[string]any{"provider": "line", "credential": "l-1|"}})
+	s.Require().Equal(http.StatusOK, w.Code, w.Body.String())
+	added := s.bus.sent[len(s.bus.sent)-1]
+
+	w = s.do(request{method: "DELETE", path: "/identity/v1/users/alice/socials", bearer: auth,
+		body: map[string]any{"provider": "line", "social_id": "l-1"}})
+	s.Require().Equal(http.StatusOK, w.Code, w.Body.String())
+	s.Require().False(linked(alice.User.ID, user.LINE, "l-1"))
+
+	s.Require().NoError(s.bus.Publish(added.Topic, added.Data))
+	s.False(linked(alice.User.ID, user.LINE, "l-1"), "replayed event re-linked an unlinked account")
+
+	// Moved: alice's signed event published under bob's subject.
+	moved := strings.Replace(added.Topic, alice.User.ID.String(), bob.User.ID.String(), 1)
+	s.Require().NoError(s.bus.Publish(moved, added.Data))
+	s.False(linked(bob.User.ID, user.LINE, "l-1"), "event applied under another user's subject")
 }
 
 func TestIdentity(t *testing.T) {

@@ -28,6 +28,7 @@ import (
 	"github.com/flarexio/core/pubsub"
 	"github.com/flarexio/identity"
 	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/eventsig"
 	"github.com/flarexio/identity/passkeys"
 	"github.com/flarexio/identity/persistence"
 	"github.com/flarexio/identity/persistence/inmem"
@@ -287,7 +288,13 @@ func run(cli *cli.Context) error {
 		// Add Event Sourcing
 		// SUB users.>
 		endpoint := identity.EventEndpoint(projection)
-		handler := transPubSub.EventHandler(endpoint, log)
+		signing := cfg.EventBus.Signing
+		if signing.AllowUnsigned {
+			log.Warn("eventBus.signing.allowUnsigned is on: unsigned events will be applied")
+		}
+
+		verifier := eventsig.NewVerifier(signing.PublicKeys()...)
+		handler := transPubSub.EventHandler(endpoint, verifier, signing.AllowUnsigned, log)
 
 		if err := natsPS.PullConsume(consumer, handler); err != nil {
 			log.Error(err.Error())
@@ -297,7 +304,7 @@ func run(cli *cli.Context) error {
 		ps = natsPS
 	}
 
-	events.ReplaceGlobals(ps)
+	events.ReplaceGlobals(eventsig.Publisher(ps, eventsig.NewSigner(cfg.EventBus.Signing.Key)))
 
 	// Add PubSub Transport
 	{
