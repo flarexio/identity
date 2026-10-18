@@ -7,14 +7,47 @@ The `USERS` stream is identity's source of truth: the projection rebuilds accoun
 
 So, in NATS itself, let only identity publish user events or manage the stream, and give every other service read-only access.
 
-These examples use `nsc`, since identity connects with a `.creds` file (operator/JWT mode). Replace the account and user names with yours, then push the account with `nsc push`. Credentials issued from the edited users pick up the new permissions when they reconnect.
+This assumes decentralized JWT auth managed with `nsc`, which is what a `.creds` file means. Every command below was run against a nats-server with the `nats` account resolver; the checks at the end are the ones used.
+
+## Where permissions live
+
+A user's permissions are in its **user JWT**, inside its `.creds` file, not on the server. Two consequences:
+
+- After `nsc edit user`, the service only gets the new permissions once you **issue it a new `.creds` file** and deploy that. `nsc push` is not needed for this, since the account does not change.
+- **Old `.creds` files keep their old, broader permissions** until they expire. Tightening permissions only helps once the old JWTs are **revoked**.
+
+Revocation is by time: `nsc revocations add-user --at T` rejects every JWT for that user issued at or before `T`. `nsc generate creds` reuses the user's current JWT, so a JWT must be re-issued (by `nsc edit user`) *after* `T` to survive.
+
+## Rolling it out without downtime
+
+For each user (identity's and every other service's):
+
+```sh
+ACCOUNT=<your account>
+USER=<the service's user>
+
+# 1. Note the cutoff, then wait a second: revocation has 1s granularity.
+CUTOFF=$(date +%s); sleep 2
+
+# 2. Set the permissions (sections below). This issues a new JWT.
+nsc edit user -a "$ACCOUNT" -n "$USER" ...
+
+# 3. Issue and deploy the new creds; restart the service with them.
+nsc generate creds -a "$ACCOUNT" -n "$USER" > "$USER.creds"
+
+# 4. Once every instance runs on the new creds, revoke the old ones.
+nsc revocations add-user -a "$ACCOUNT" -n "$USER" --at "$CUTOFF"
+nsc push -a "$ACCOUNT"
+```
+
+Between steps 2 and 4 both old and new creds connect, so services can be redeployed one at a time. After step 4 the old creds fail with `Authorization Violation`, including on their existing connections. With a memory resolver instead of the `nats` resolver, regenerate the server config and reload it in place of `nsc push`.
 
 ## identity
 
 identity publishes events, runs its JetStream consumer and the `identity.signin` service:
 
 ```sh
-nsc edit user identity \
+nsc edit user -a "$ACCOUNT" -n identity \
   --allow-pub 'users.>' \
   --allow-pub '$JS.API.>' \
   --allow-pub '$JS.ACK.USERS.>' \
@@ -26,14 +59,14 @@ nsc edit user identity \
   --allow-pub-response
 ```
 
-`$JS.API.>` is broad because identity creates (or updates) its own stream and consumer at startup. Once both exist you can narrow it to `$JS.API.INFO`, `$JS.API.STREAM.INFO.USERS`, `$JS.API.CONSUMER.>` and `$JS.API.CONSUMER.MSG.NEXT.USERS.>`.
+`$JS.API.>` is broad because identity creates its stream and consumer at startup if they are missing. Once both exist you can narrow it to `$JS.API.INFO`, `$JS.API.STREAM.INFO.USERS`, `$JS.API.CONSUMER.>` and `$JS.API.CONSUMER.MSG.NEXT.USERS.>`.
 
 ## Every other service in the account
 
-Deny publishing user events and changing the stream; reading through their own consumers stays allowed:
+Deny publishing user events and changing the stream; reading, including through their own consumers, stays allowed:
 
 ```sh
-nsc edit user <service> \
+nsc edit user -a "$ACCOUNT" -n <service> \
   --deny-pub 'users.>' \
   --deny-pub '$JS.API.STREAM.CREATE.USERS' \
   --deny-pub '$JS.API.STREAM.UPDATE.USERS' \
@@ -42,15 +75,22 @@ nsc edit user <service> \
   --deny-pub '$JS.API.STREAM.MSG.DELETE.USERS'
 ```
 
-A service that only calls `identity.signin` needs nothing beyond the defaults plus `_INBOX.>` for the reply.
+Calling `identity.signin` keeps working with these.
+
+## Keys
+
+Anyone holding the account's identity key or one of its signing keys can mint a user with any permissions, which undoes all of the above. Keep them in the `nsc` keystore on an operator's machine, never on the hosts that run services; services only ever need their own `.creds`. Optionally give user JWTs an expiry (`nsc edit user --expiry 90d`) so a leaked `.creds` file stops working on its own.
 
 ## Checking it
 
-With a non-identity user's credentials, both of these should be refused with a permissions violation:
+With another service's new creds, the first two must fail with a permissions violation (the stream commands time out because the server drops the request); the last must succeed:
 
 ```sh
-nats --creds other.creds pub users.01J0000000000000000000000.activated '{}'
-nats --creds other.creds stream purge USERS -f
+nats --creds service.creds pub users.01J0000000000000000000000.activated '{}'
+nats --creds service.creds stream purge USERS -f
+nats --creds service.creds stream info USERS
 ```
 
-Consumers other than identity that rely on user events should verify them as well, with `eventsig.NewVerifier` and identity's event-signing public key (the "Public Key" line `identity genkey` printed with it).
+With that service's old creds, after step 4, every command must fail with `Authorization Violation`.
+
+Consumers other than identity that rely on user events should also verify them, with `eventsig.NewVerifier` and identity's event-signing public key (the "Public Key" line `identity genkey` printed with it).
