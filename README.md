@@ -13,6 +13,8 @@ This project relies on NATS Server with JetStream functionality for its operatio
 
 For installation instructions and details about NATS Server with JetStream, please refer to the official NATS website (https://nats.io).
 
+Lock down who may publish to the `USERS` stream as described in [docs/nats.md](docs/nats.md).
+
 ## Installation
 
 You can install Identity using one of the following methods:
@@ -45,12 +47,13 @@ You can install Identity using one of the following methods:
 
 ### Docker
 
-The image contains the service and the built frontend, but no configuration. Mount your `config.yaml` (and `user.creds` for NATS):
+The image contains the service and the built frontend, but no configuration. It runs as an unprivileged user (uid 10001) with `IDENTITY_PATH=/var/lib/identity`. Mount your `config.yaml` and `user.creds` (for NATS) there, readable by that user. If the database is in that directory too (the default), it must be writable by that user:
 
 ```shell
 docker run -d -p 8080:8080 \
-  -v $PWD/config.yaml:/root/.flarex/identity/config.yaml:ro \
-  -v $PWD/user.creds:/root/.flarex/identity/user.creds:ro \
+  -v $PWD/config.yaml:/var/lib/identity/config.yaml:ro \
+  -v $PWD/user.creds:/var/lib/identity/user.creds:ro \
+  -v identity-data:/var/lib/identity/users \
   flarexio/identity:latest
 ```
 
@@ -62,6 +65,8 @@ The browser never stores a bearer token: signing in sets an HttpOnly, `SameSite=
 
 ## Upgrading
 
+- **The container runs as uid 10001 and reads `/var/lib/identity`** instead of `/root/.flarex/identity`. Move your mounts, and `chown -R 10001` the data volume.
+- **Built with Go 1.27** (`toolchain` in `go.mod`). Older toolchains have known `net/http` and `crypto/tls` vulnerabilities this service is exposed to.
 - **`jwt.admins` now lists user IDs**, not usernames. Usernames are derived from e-mail addresses and freed when an account is deleted, so a username could end up with someone else. Startup fails until entries are user IDs.
 - **User events are signed.** Add `eventBus.signing.key` (generate with `identity genkey`; use a different key from `jwt.privkey`), the same key on every instance consuming the stream. Unsigned events are ignored. Events already in the stream from before the upgrade are unsigned: an existing instance has applied them already, so this changes nothing for it. To build a fresh instance from that history, start it once with `eventBus.signing.allowUnsigned: true` until it has caught up, then turn it off. To rotate the key, move the old public key into `eventBus.signing.trusted`.
 - **No fallback to `config.example.yaml`**, and its placeholder signing key is rejected. Anyone can sign tokens with a key published in this repository.
