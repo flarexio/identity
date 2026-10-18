@@ -1,0 +1,138 @@
+:host {
+  display: grid;
+  gap: 1.25rem;
+  padding-block: 2rem;
+}
+
+.profile {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 2rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  margin: 0 0 1rem;
+  font-size: 1.15rem;
+}
+
+h3 {
+  margin: 1.5rem 0 0.75rem;
+  font-size: 1rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.accounts li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.accounts li:first-child {
+  border-top: none;
+}
+
+.provider {
+  font-weight: 600;
+  min-width: 6rem;
+}
+
+.since {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.google {
+  min-height: 44px;
+}
+
+.line {
+  background: #06c755;
+  border-color: #06c755;
+  color: #fff;
+}
+
+.danger h2 {
+  color: var(--danger);
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+input {
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .profile {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .accounts li {
+    flex-wrap: wrap;
+  }
+}

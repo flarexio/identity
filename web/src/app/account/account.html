@@ -1,0 +1,115 @@
+@if (user(); as u) {
+  <section class="card profile">
+    @if (u.avatar) {
+      <img
+        class="avatar"
+        [src]="u.avatar"
+        alt=""
+        referrerpolicy="no-referrer"
+        width="72"
+        height="72"
+      />
+    } @else {
+      <div class="avatar placeholder" aria-hidden="true">
+        {{ (u.name || u.username).charAt(0) }}
+      </div>
+    }
+    <div>
+      <h1>{{ u.name || u.username }}</h1>
+      <dl>
+        <dt>使用者名稱</dt>
+        <dd>
+          <code>{{ u.username }}</code>
+        </dd>
+        @if (u.email) {
+          <dt>電子郵件</dt>
+          <dd>{{ u.email }}</dd>
+        }
+        <dt>建立時間</dt>
+        <dd>{{ u.created_at | date: 'yyyy/MM/dd' }}</dd>
+      </dl>
+    </div>
+  </section>
+
+  @if (notice(); as n) {
+    <p class="notice" role="status">{{ n }}</p>
+  }
+  @if (error(); as e) {
+    <p class="alert" role="alert">{{ e }}</p>
+  }
+
+  <section class="card">
+    <h2>登入方式</h2>
+    <ul class="accounts">
+      @for (a of u.accounts; track a.social_provider + a.social_id) {
+        <li>
+          <span class="provider">{{ names[a.social_provider] ?? a.social_provider }}</span>
+          <span class="since muted">{{ a.created_at | date: 'yyyy/MM/dd' }} 綁定</span>
+          <button
+            type="button"
+            class="button small"
+            (click)="unlink(a)"
+            [disabled]="busy() || u.accounts.length <= 1"
+            [title]="u.accounts.length <= 1 ? '至少要保留一種登入方式' : ''"
+          >
+            解除綁定
+          </button>
+        </li>
+      }
+    </ul>
+
+    @if (canLinkGoogle() || canLinkLINE() || canLinkPasskey()) {
+      <h3>新增登入方式</h3>
+      <div class="link" [attr.aria-busy]="busy()">
+        @if (canLinkGoogle() && !googleFailed()) {
+          <div class="google" #googleButton></div>
+        }
+        @if (canLinkLINE()) {
+          <button type="button" class="button line" (click)="linkLINE()" [disabled]="busy()">
+            綁定 LINE
+          </button>
+        }
+        @if (canLinkPasskey()) {
+          <button type="button" class="button" (click)="addPasskey()" [disabled]="busy()">
+            新增通行金鑰
+          </button>
+        }
+      </div>
+    }
+  </section>
+
+  <section class="card danger">
+    <h2>刪除帳號</h2>
+    <p class="muted">帳號刪除後無法復原，所有已綁定的登入方式都會一併移除。</p>
+    @if (!confirmDelete()) {
+      <button type="button" class="button danger" (click)="confirmDelete.set(true)">
+        刪除帳號…
+      </button>
+    } @else {
+      <form (ngSubmit)="deleteAccount()">
+        <label for="confirm-username"
+          >請輸入使用者名稱 <code>{{ u.username }}</code> 以確認：</label
+        >
+        <input
+          id="confirm-username"
+          name="confirm"
+          [(ngModel)]="deleteInput"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="row">
+          <button
+            type="submit"
+            class="button danger"
+            [disabled]="busy() || deleteInput !== u.username"
+          >
+            永久刪除
+          </button>
+          <button type="button" class="button" (click)="confirmDelete.set(false); deleteInput = ''">
+            取消
+          </button>
+        </div>
+      </form>
+    }
+  </section>
+}

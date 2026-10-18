@@ -1,0 +1,7 @@
+.git
+.github
+**/node_modules
+web/dist
+web/.angular
+config.yaml
+*.db

@@ -3,396 +3,226 @@ package http
 import (
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-kit/kit/endpoint"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/oklog/ulid/v2"
 
 	"github.com/flarexio/identity"
-	"github.com/flarexio/identity/conf"
+	"github.com/flarexio/identity/token"
 	"github.com/flarexio/identity/user"
 )
 
-// rolesFor returns the roles embedded in a user's token. Everyone is a "user";
-// usernames listed in jwt.admins additionally get "admin".
-func rolesFor(username string) []string {
-	roles := []string{"user"}
-	if slices.Contains(conf.G().JWT.Admins, username) {
-		roles = append(roles, "admin")
+// SessionCookie holds the browser session (see token.IssueSession). The
+// __Host- prefix makes the browser insist on Secure, Path=/ and no Domain,
+// so no sibling subdomain can set or overwrite it.
+const SessionCookie = "__Host-identity_session"
+
+// SetSession stores the session cookie for resp, if it carries one.
+func SetSession(c *gin.Context, resp identity.SignInResponse) {
+	if resp.Session == nil {
+		return
 	}
-	return roles
+
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    resp.Session.Token,
+		Path:     "/",
+		Expires:  resp.Session.ExpiredAt,
+		MaxAge:   int(time.Until(resp.Session.ExpiredAt).Seconds()),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
-func RegisterHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req identity.RegisterRequest
-		if err := c.ShouldBind(&req); err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		resp, err := endpoint(c, req)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		c.JSON(http.StatusOK, &resp)
-	}
-}
-
-func OTPVerifyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		var req identity.OTPVerifyRequest
-		if err := c.ShouldBind(&req); err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-		req.Username = username
-
-		resp, err := endpoint(c, req)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		c.JSON(http.StatusOK, &resp)
-	}
+func clearSession(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
 func SignInHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req identity.SignInRequest
-		err := c.ShouldBind(&req)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
+		if err := c.ShouldBindJSON(&req); err != nil {
+			badRequest(c, err)
 			return
 		}
 
-		resp, err := endpoint(c, req)
+		resp, err := endpoint(c.Request.Context(), req)
 		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
+			Fail(c, err)
 			return
 		}
 
 		response, ok := resp.(identity.SignInResponse)
 		if !ok {
-			err := errors.New("invalid user")
-			unauthorized(c, http.StatusExpectationFailed, err)
+			Fail(c, errors.New("unexpected sign-in response"))
 			return
 		}
 
-		u := response.User
+		SetSession(c, response)
+		c.JSON(http.StatusOK, response)
+	}
+}
 
-		cfg := conf.G()
-		now := time.Now()
-		claims := Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    cfg.BaseURL,
-				Subject:   u.Username,
-				Audience:  cfg.JWT.Audiences,
-				ExpiresAt: jwt.NewNumericDate(now.Add(cfg.JWT.Timeout)),
-				IssuedAt:  jwt.NewNumericDate(now),
-				ID:        ulid.Make().String(),
-			},
-			Roles:         rolesFor(u.Username),
-			PasskeyUserID: passkeyUserID(u),
+// SessionTokenHandler trades the session cookie for an access token, so a
+// browser keeps its access token in memory only and recovers it on reload.
+func SessionTokenHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session, err := c.Cookie(SessionCookie)
+		if err != nil || session == "" {
+			Fail(c, token.ErrRenewExpired)
+			return
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-		tokenStr, err := token.SignedString(cfg.JWT.Privkey)
+		resp, err := endpoint(c.Request.Context(), session)
 		if err != nil {
-			unauthorized(c, http.StatusExpectationFailed, err)
+			// A session that is over goes; one we merely failed to serve
+			// (storage hiccup, say) stays for the next attempt.
+			if classify(err).status == http.StatusUnauthorized {
+				clearSession(c)
+			}
+			Fail(c, err)
 			return
 		}
 
-		response.Token = &identity.Token{
-			Token:     tokenStr,
-			ExpiredAt: now.Add(cfg.JWT.Timeout),
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
+func SignOutHandler(c *gin.Context) {
+	clearSession(c)
+	c.Status(http.StatusNoContent)
+}
+
+func RefreshHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, ok := ClaimsFrom(c)
+		if !ok {
+			Fail(c, token.ErrInvalidToken)
+			return
 		}
 
-		c.JSON(http.StatusOK, &response)
+		resp, err := endpoint(c.Request.Context(), claims)
+		if err != nil {
+			Fail(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
 	}
-}
-
-func unauthorized(c *gin.Context, code int, err error) {
-	c.Abort()
-	c.Error(err)
-	c.Header("WWW-Authenticate", "Bearer realm="+issuer)
-	c.String(code, err.Error())
-}
-
-func RefreshHandler(c *gin.Context) {
-	cfg := conf.G()
-	if !cfg.JWT.Refresh.Enabled {
-		err := errors.New("token refresh disabled")
-		c.Abort()
-		c.Error(err)
-		c.String(http.StatusForbidden, err.Error())
-		return
-	}
-
-	var claims Claims
-	if err := ParseToken(c, &claims); err != nil {
-		unauthorized(c, http.StatusUnauthorized, err)
-		return
-	}
-
-	if time.Since(claims.IssuedAt.Time) > cfg.JWT.Refresh.Maximum {
-		err := errors.New("token beyond refresh time")
-		unauthorized(c, http.StatusForbidden, err)
-		return
-	}
-
-	now := time.Now()
-	claims.ExpiresAt = jwt.NewNumericDate(now.Add(cfg.JWT.Timeout))
-	claims.IssuedAt = jwt.NewNumericDate(now)
-	claims.ID = ulid.Make().String()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	tokenStr, err := token.SignedString(cfg.JWT.Privkey)
-	if err != nil {
-		unauthorized(c, http.StatusExpectationFailed, err)
-		return
-	}
-
-	t := identity.Token{
-		Token:     tokenStr,
-		ExpiredAt: now.Add(cfg.JWT.Timeout),
-	}
-
-	c.JSON(http.StatusOK, &t)
 }
 
 func AddSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
 		var req identity.AddSocialAccountRequest
-		if err := c.ShouldBind(&req); err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
+		if err := c.ShouldBindJSON(&req); err != nil {
+			badRequest(c, err)
 			return
 		}
-		req.Username = username
+		req.Username = c.Param("user")
 
-		resp, err := endpoint(c, req)
+		resp, err := endpoint(c.Request.Context(), req)
 		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
+			Fail(c, err)
 			return
 		}
 
-		c.JSON(http.StatusOK, &resp)
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
 func RemoveSocialAccountHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
 		var req identity.RemoveSocialAccountRequest
-		if err := c.ShouldBind(&req); err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
+		if err := c.ShouldBindJSON(&req); err != nil {
+			badRequest(c, err)
 			return
 		}
-		req.Username = username
+		req.Username = c.Param("user")
 
-		resp, err := endpoint(c, req)
+		resp, err := endpoint(c.Request.Context(), req)
 		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
+			Fail(c, err)
 			return
 		}
 
-		c.JSON(http.StatusOK, &resp)
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
-func UserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
+// UsernameHandler serves endpoints whose request is just the :user param.
+func UsernameHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		resp, err := endpoint(c, username)
+		resp, err := endpoint(c.Request.Context(), c.Param("user"))
 		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
+			Fail(c, err)
 			return
 		}
 
-		c.JSON(http.StatusOK, &resp)
+		if resp == nil {
+			c.Status(http.StatusNoContent)
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
+// DeleteUserHandler deletes the user and, when they delete themselves, ends
+// the browser session along with the account.
 func DeleteUserHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
+
+		if _, err := endpoint(c.Request.Context(), username); err != nil {
+			Fail(c, err)
 			return
 		}
 
-		_, err := endpoint(c, username)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
+		if claims, ok := ClaimsFrom(c); ok && claims.Subject == username {
+			clearSession(c)
 		}
 
-		c.String(http.StatusOK, "user deleted")
+		c.Status(http.StatusNoContent)
 	}
 }
 
-func RegisterPasskeyHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		username := c.Param("user")
-		if username == "" {
-			err := errors.New("user required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		resp, err := endpoint(c, username)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		c.JSON(http.StatusOK, &resp)
-	}
-}
-
+// DirectUserBySocialIDHandler serves the mTLS route that mints a token for
+// a user by social ID. ?provider= names the provider; without it the ID
+// must be unambiguous across providers.
 func DirectUserBySocialIDHandler(endpoint endpoint.Endpoint) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		subject := c.Param("subject")
-		if subject == "" {
-			err := errors.New("subject required")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusBadRequest, err.Error())
-			return
+		req := identity.UserBySocialIDRequest{
+			Provider: user.SocialProvider(c.Query("provider")),
+			SocialID: user.SocialID(c.Param("subject")),
 		}
 
-		socialID := user.SocialID(subject)
-
-		resp, err := endpoint(c, socialID)
+		resp, err := endpoint(c.Request.Context(), req)
 		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
+			Fail(c, err)
 			return
 		}
 
-		u, ok := resp.(*user.User)
-		if !ok {
-			err := errors.New("invalid user response")
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		cfg := conf.G()
-		now := time.Now()
-
-		claims := Claims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:    cfg.BaseURL,
-				Subject:   u.Username,
-				Audience:  cfg.JWT.Audiences,
-				ExpiresAt: jwt.NewNumericDate(now.Add(cfg.JWT.Timeout)),
-				IssuedAt:  jwt.NewNumericDate(now),
-				ID:        ulid.Make().String(),
-			},
-			Roles:         rolesFor(u.Username),
-			PasskeyUserID: passkeyUserID(u),
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-		tokenStr, err := token.SignedString(cfg.JWT.Privkey)
-		if err != nil {
-			c.Abort()
-			c.Error(err)
-			c.String(http.StatusExpectationFailed, err.Error())
-			return
-		}
-
-		response := &identity.SignInResponse{
-			User: u,
-			Token: &identity.Token{
-				Token:     tokenStr,
-				ExpiredAt: now.Add(cfg.JWT.Timeout),
-			},
-		}
-
-		c.JSON(http.StatusOK, &response)
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
-func passkeyUserID(u *user.User) string {
-	id, ok := u.SocialID(user.PASSKEYS)
-	if !ok {
-		return ""
-	}
+func JWKHandler(tokens *token.Issuer) gin.HandlerFunc {
+	jwks := tokens.JWKS()
 
-	return string(id)
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Cross-Origin-Resource-Policy", "cross-origin")
+		c.JSON(http.StatusOK, jwks)
+	}
 }

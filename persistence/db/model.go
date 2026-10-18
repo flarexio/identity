@@ -13,6 +13,7 @@ type User struct {
 	Username string
 	Name     string
 	Email    string
+	Avatar   string
 	Status   user.Status
 	Accounts []*SocialAccount
 	DataModel
@@ -29,6 +30,7 @@ func NewUser(u *user.User) *User {
 		Username: u.Username,
 		Name:     u.Name,
 		Email:    u.Email,
+		Avatar:   u.Avatar,
 		Status:   u.Status,
 		Accounts: accounts,
 		DataModel: DataModel{
@@ -58,6 +60,7 @@ func (u *User) reconstitute() *user.User {
 		Username: u.Username,
 		Name:     u.Name,
 		Email:    u.Email,
+		Avatar:   u.Avatar,
 		Status:   u.Status,
 		Accounts: accounts,
 		Model: model.Model{
@@ -69,10 +72,11 @@ func (u *User) reconstitute() *user.User {
 	}
 }
 
+// A social ID is only unique within its provider, hence the composite index.
 type SocialAccount struct {
-	UserID   string        `gorm:"primaryKey"`
-	SocialID user.SocialID `gorm:"primaryKey"`
-	Provider user.SocialProvider
+	UserID   string              `gorm:"primaryKey"`
+	SocialID user.SocialID       `gorm:"primaryKey;uniqueIndex:idx_social_accounts_provider_social_id,priority:2"`
+	Provider user.SocialProvider `gorm:"uniqueIndex:idx_social_accounts_provider_social_id,priority:1"`
 	DataModel
 }
 

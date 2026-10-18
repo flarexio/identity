@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Go microservice for user identity management (`github.com/flarexio/identity`), built with go-kit. It authenticates users via Google, LINE, or Passkeys, issues its own ed25519-signed JWTs, and publishes user lifecycle events over NATS JetStream. It also brokers one-time SCEP enrollment challenges for device certificates issued by a StepCA instance.
+A Go microservice for user identity management (`github.com/flarexio/identity`), built with go-kit, plus an Angular frontend in `web/`. It authenticates users via Google, LINE, or Passkeys, issues its own ed25519-signed JWTs, and publishes user lifecycle events over NATS JetStream. It also brokers one-time SCEP enrollment challenges for device certificates issued by a StepCA instance.
 
 ## Commands
 
 ```sh
 # Build the CLI binary
-go build -o $GOPATH/bin/identity cmd/identity/main.go
+go build -o $GOPATH/bin/identity ./cmd/identity
 
 # Build (as CI does it; requires CGO for the sqlite driver)
-CGO_ENABLED=1 go build cmd/identity/main.go
+CGO_ENABLED=1 go build ./cmd/identity
 
 # Run all tests
 go test -v ./...
@@ -21,56 +21,66 @@ go test -v ./...
 # Run tests for one package
 go test ./persistence/db/...
 
-# Run a single test (persistence tests use testify suites, e.g. userRepositoryTestSuite)
-go test -run TestUserRepositoryTestSuite ./persistence/db/...
+# Run a single test (suites use testify, e.g. the end-to-end suite in cmd/identity)
+go test -run TestIdentity/TestLinkAndUnlink ./cmd/identity/
 
 # Generate a new ed25519 keypair for jwt.privkey in config.yaml
-go run cmd/identity/main.go genkey
+go run ./cmd/identity genkey
+
+# Frontend (web/)
+npm ci                      # install
+npm start                   # dev server on :4200, proxying API paths to :8080 (proxy.conf.json)
+npm test -- --watch=false   # vitest unit tests
+npm run build               # production build into web/dist
 ```
 
-Running the service requires a reachable NATS server with JetStream (see README) — `run()` in `cmd/identity/main.go` connects to it and blocks (with a 30s timeout) on `AddJetStream`/`AddStreamAndConsumer` before the HTTP server starts. Config is loaded from `$IDENTITY_PATH/config.yaml` (falls back to `config.example.yaml` if absent); `$IDENTITY_PATH` defaults to `~/.flarex/identity`. YAML values support `$ENV_VAR` expansion (`conf/env_reader.go`). Loaded config is available process-wide via `conf.G()`.
+Running the service requires a reachable NATS server with JetStream (see README) — `run()` in `cmd/identity/main.go` connects to it and blocks (with a 30s timeout) on `AddJetStream`/`AddStreamAndConsumer` before the HTTP server starts. Config is loaded from `$IDENTITY_PATH/config.yaml` only; there is deliberately no fallback to `config.example.yaml`, and `conf.LoadConfigFile` refuses the example's placeholder key, a key whose public half doesn't match its seed, `jwt.admins` entries that aren't user IDs, and a weak SCEP secret. `$IDENTITY_PATH` defaults to `~/.flarex/identity`. YAML values support `$ENV_VAR` expansion (`conf/env_reader.go`). The frontend is served from `http.web` (default `$IDENTITY_PATH/web`) when that directory holds an `index.html`.
 
 ## Architecture
 
 ### Layering (go-kit style)
 
-Each bounded piece of functionality (`identity` root package, `passkeys/`, `scep/`) follows the same three layers:
+1. **Service** (`service.go`, `passkeys/service.go`, `scep/service.go`) — business logic behind a `Service` interface. `identity.Service` is wrapped by `LoggingMiddleware` (`logging.go`). Credential verification is delegated to `provider.Verifier`s (see below), injected as a `map[user.SocialProvider]identity.Provider`.
+2. **Endpoint** (`endpoint.go`, `passkeys/endpoint.go`, `scep/endpoint.go`) — go-kit endpoints. `identity.NewEndpointSet(svc, tokens)` builds them; the sign-in, session, refresh and mTLS endpoints also mint tokens via `token.Issuer`, so every transport issues tokens the same way.
+3. **Transport** (`transport/http`, `transport/line`, `transport/pubsub`) — gin or NATS handlers that decode, call the endpoint, and encode. Route wiring lives in `cmd/identity/server.go` (`publicRouter`, `mtlsRouter`), process wiring in `cmd/identity/main.go`.
 
-1. **Service** (`service.go`, `passkeys/service.go`, `scep/service.go`) — business logic, defined as a `Service` interface plus a concrete struct. `identity.Service` is wrapped by `LoggingMiddleware` (`logging.go`) using the `ServiceMiddleware` decorator pattern.
-2. **Endpoint** (`endpoint.go`, `passkeys/endpoint.go`, `scep/endpoint.go`) — go-kit `endpoint.Endpoint` adapters, one per service method, doing request-type assertions only.
-3. **Transport** (`transport/http`, `transport/line`, `transport/pubsub`, `passkeys/transport.go`, `transport/http/scep.go`) — gin HTTP handlers or NATS handlers that decode a request, call the endpoint, and encode the response. All wiring happens in `cmd/identity/main.go`.
-
-The domain model itself lives in `user/` (`user.go`, `event.go`, `repository.go`, `context.go`) — a `User` aggregate independent of any transport or persistence concern.
+The domain model lives in `user/`: a `User` aggregate independent of transport and persistence. Its invariants (no duplicate social account, never remove the last one) are enforced there and return sentinel errors (`user.ErrSocialAccountExists`, …). `errors.go` holds the service-level errors; `transport/http/errors.go` maps every error to a status and a generic message — internal and upstream error text never reaches clients.
 
 ### Event sourcing round trip
 
-This is the part that isn't obvious from file layout alone. Domain methods on `*user.User` (`Register`, `Activate`, `AddSocialAccount`, `RemoveSocialAccount`, `Delete`) don't write to the repository directly — they mutate the in-memory struct and queue a `events.DomainEvent` via the embedded `events.EventStore`. Service methods then call `u.Notify()` (deferred), which publishes those queued events to NATS JetStream (stream `USERS`, subjects `users.>`, topic per event via `Event.Topic()`).
+Domain methods on `*user.User` (`Register`, `Activate`, `AddSocialAccount`, `RemoveSocialAccount`, `Delete`) mutate the in-memory struct and queue a `events.DomainEvent`. Service methods then call `u.Notify()`, which publishes them to NATS JetStream (stream `USERS`, subjects `users.<id>.<event>`); a publish failure fails the command.
 
-The actual repository writes happen on the *other end*: `cmd/identity/main.go` sets up a JetStream pull consumer that feeds `identity.EventEndpoint` → `EventHandler` (implemented by the same `service`/`loggingMiddleware`, see `UserRegisteredHandler` etc. in `service.go`/`logging.go`), which is what calls `svc.users.Store(...)`/`Delete(...)`. So a command like `SignIn` creating a new user returns a `*user.User` to the HTTP caller immediately, but that user isn't actually persisted until the published event round-trips back through the consumer — asynchronously, in the same process.
+The repository writes happen on the other end: `identity.NewEventHandler(repo)` (`projection.go`, wrapped by `EventLoggingMiddleware`) consumes `users.>` via `transport/pubsub.EventHandler` and calls `Store`/`Delete`. So `SignIn` creating a new user returns the user immediately, but it is persisted only once its events round-trip — asynchronously, in the same process. JetStream delivers at least once, so projection handlers are idempotent. `transport/pubsub` acks events that can never apply (undecodable, topic/payload user mismatch, not-found, conflicts, stale) and leaves others unacked for redelivery.
+
+Because the projection is what writes accounts, anything able to publish to `users.>` could otherwise rewrite them. So events are signed (`eventsig/`): the global publisher is wrapped by `eventsig.Publisher` with `eventBus.signing.key`, which appends a `"sig"` field (ed25519 over topic + event JSON) to each event, and `transport/pubsub.EventHandler` drops anything that doesn't verify against that key or `eventBus.signing.trusted`. `eventBus.signing.allowUnsigned` admits unsigned events, only for replaying pre-signing history into a fresh instance. Replays of genuine events are stopped by the projection, which skips any event older than the user's `UpdatedAt` (`ErrStaleEvent`) — so domain methods must set `UpdatedAt` before building their event, which takes its time from it.
 
 ### Authentication providers
 
-Three `user.SocialProvider` values are implemented in `service.go` (`SignIn`/`AddSocialAccount`); `FACEBOOK` is defined in `user/user.go` but has no implementation anywhere.
+`provider/` reduces each provider's credential to a `provider.Identity` (subject, name, verified email, picture). Failures wrap `provider.ErrInvalidCredential`.
 
-- **Google** — verifies the ID token via `idtoken.Validate` against `providers.google.client.id`.
-- **LINE** — manually parses the ID token as a JWT HMAC-signed with the channel secret (`providers.line.channel.secret`), checking issuer/audience and comparing the token's `nonce` claim against the OAuth session nonce stored server-side by `transport/line/transport.go` (state/nonce dance for both the `SignIn` and `LinkAccount` operations, driven by `/auth/line` → `/auth/line/callback`).
-- **Passkeys** — delegates to an external Passkeys-as-a-service API (`passkeys/service.go`, configured under `providers.passkeys`); registration/login/transaction ceremonies are proxied there, and tokens it issues are verified against its own JWKS.
+- **Google** — `idtoken.Validate` against `providers.google.client.id`; e-mail kept only if `email_verified`.
+- **LINE** — HS256 ID token signed with the channel secret; issuer, audience, expiry and the `nonce` (passed in the context via `provider.WithNonce`) are checked. `transport/line` runs the authorization-code flow with PKCE, binding each flow's `state` to the starting browser with the `__Host-identity_line_state` cookie (prevents login and account-linking CSRF). The sign-in callback sets the session cookie and redirects to the frontend.
+- **Passkeys** — an external Passkeys API (`passkeys/service.go`, `providers.passkeys`; disabled when `baseURL` is empty). Ceremonies are proxied; its tokens are verified against its JWKS. `RegisterPasskey` uses the user's own ID as the WebAuthn user handle, and `AddSocialAccount` only links a passkey token whose subject is that ID.
 
-Only Google and LINE can create a brand-new user on first sign-in (see the `FindBySocialID` → not-found → `user.NewUser(...)` branches in `signInWithGoogle`/`signInWithLINE`). Passkey sign-in (`signInWithPasskeys`) only looks up an existing account — `RegisterPasskey` itself requires an already-existing username. `POST /users` (the plain `Register` endpoint, for opening an account without any social provider) is wired in `endpoint.go` but commented out in `main.go`, so it is not currently reachable. `OTPVerify` exists as an endpoint but its verification logic is an unimplemented stub in `service.go`.
+Google and LINE open an account on first sign-in (`identity.Provider.OpensAccounts`); passkeys never do. Usernames come from the verified e-mail's local part, sanitized to `[a-z0-9._-]`, with a random suffix on collision. Only `Activated` users may sign in or receive tokens.
 
-### Two HTTP transports
+### Tokens and sessions (`token/`)
 
-- **Public server** (`--port`/`IDENTITY_HTTP_PORT`, default 8080) — serves `/identity/v1/*` (JWT + Rego-policy protected via `transHTTP.Authorizator`, policy rules in `permissions.json`, evaluated by `flarexio/core/policy`), the LINE OAuth routes, and `/.well-known/jwks.json`.
-- **mTLS server** (`--mtls-enabled`, `--mtls-port`/`IDENTITY_MTLS_PORT`, default 8443) — for service-to-service calls, using certs under `$IDENTITY_PATH/certs/`. Routes: `/users/:subject` (mints a JWT directly for the given social ID — no further credential check beyond the client cert, gated by `transHTTP.RequireClientOU` against `mtls.allowedOUs` in config), and `/scep/challenge/generate` + `/scep/challenge/verify` (one-time SCEP enrollment challenges for StepCA device certs, additionally checked in `transport/http/scep.go` via a pinned webhook client cert CN and an HMAC-signed webhook body).
+Identity mints its own EdDSA JWTs. **Access tokens**: `sub` is the *username*; `uid` is the user ID; `auth_time` is when the user last really authenticated; `roles` is `user` plus `admin` for user IDs in `jwt.admins`; `passkey_user_id` is the user's passkey social ID — **omitted** when none is linked, so a relying party sees nothing rather than an empty string it might match against (`flarexio/wallet` compares it against the `user_id` in its sign requests). Tokens are verified against `jwt.audiences[0]`; the JWKS is at `/.well-known/jwks.json`.
 
-### JWT
+Nothing is ever issued past `auth_time + jwt.refresh.maximum` (or `+ jwt.timeout` when refresh is disabled). `PATCH /identity/v1/token/refresh` checks the account is still active and is still the one in `uid` (usernames are freed on deletion and can be reused); tokens without `uid`/`auth_time` must sign in again.
 
-Identity mints its own ed25519 (EdDSA) JWT after a successful sign-in — independent of whatever token the social provider issued — via `transport/http/token.go` (`Init`, `ParseToken`) and `transport/http/transport.go` (`SignInHandler`). `sub` is the *username*, not a social ID. The public key is exposed as JWKS at `/.well-known/jwks.json` so other services (and `transport/http/middleware.go`'s own `Authorizator`) can verify tokens issued here. `PATCH /token/refresh` reissues a token within `jwt.refresh.maximum` of the original `iat`.
+**Browser session**: sign-in also sets `__Host-identity_session` (HttpOnly, Secure, SameSite=Strict) holding a session JWT (distinct `typ` and audience; names the user by ID). The frontend keeps the access token in memory only and trades the cookie for a fresh one at `POST /identity/v1/session/token`; `DELETE /identity/v1/session` signs out. Cookie-touching routes also go through `transHTTP.SameOrigin` (Sec-Fetch-Site / Origin check) and accept JSON only.
 
-Alongside `sub` and `roles`, the token carries `passkey_user_id` — the subject's `SocialAccount` id for provider `passkeys`, read via `user.User.SocialID`. A relying party that gates an action behind a passkey assertion needs it: the passkey provider's user id is a different namespace from the username in `sub`, so without this claim nothing ties a verified assertion to an account. `flarexio/wallet` compares it against the `user_id` in its sign requests. The claim is **omitted** for users with no passkey linked, so a relying party sees nothing rather than an empty string it might match against.
+### Two HTTP servers
 
-`RefreshHandler` re-signs the claims it parsed, so a token issued before the claim existed gains it on a fresh sign-in, not on refresh. Relying parties have to treat an absent claim as "unknown" until circulation turns over.
+- **Public** (`--port`/`IDENTITY_HTTP_PORT`, default 8080) — `/identity/v1/*` (owner routes protected by `transHTTP.Authorizator`: bearer token, then the Rego policy in `permissions.json` via `flarexio/core/policy`), `/auth/line*`, `/.well-known/*`, and the frontend as the `NoRoute` fallback (SPA routing; never for `/identity`, `/auth`, `/.well-known`). Every response gets security headers; pages get a CSP whose only third party is Google Identity Services. Sign-in routes are rate limited per client IP; `http.trustedProxies` decides whose `X-Forwarded-For` counts.
+- **mTLS** (`--mtls-enabled`, `--mtls-port`/`IDENTITY_MTLS_PORT`, default 8443) — certs under `$IDENTITY_PATH/certs/`. `/users/:subject[?provider=]` mints a token for a social ID and `/scep/challenge/generate` mints SCEP challenges; both require a client cert OU in `mtls.allowedOUs` (devices hold certs from the same CA). `/scep/challenge/verify` is StepCA's webhook: pinned client cert CN plus HMAC over the body.
 
 ### Persistence
 
-`user.Repository` is the single interface all storage backends implement; `persistence.NewUserRepository` picks one by `persistence.driver` in config: `sqlite` (`persistence/db`, gorm), `badger` (`persistence/kv`), or `inmem` (`persistence/inmem`, tests only). `scep.Store` (only a plain in-memory challenge store today, `persistence/inmem/scep.go`) is separate and unrelated to the user repository.
+`user.Repository` is implemented by `sqlite` (`persistence/db`, gorm), `badger` (`persistence/kv`) and `inmem` (`persistence/inmem`, tests), chosen by `persistence.driver`. Social accounts are looked up by `(provider, social id)`. Every backend refuses a username or social account already held by another user, and hands out copies. All three run the same conformance suite, `persistence/repotest`. Badger stores each user once under `user:<id>` with ID-only indexes (`username:`, `social:<provider>:`); stores from before schema 1 are migrated on open. `scep.Store` (in-memory, `persistence/inmem/scep.go`) is unrelated to users.
+
+### Frontend (`web/`)
+
+Angular (standalone, zoneless, signals). `core/auth.ts` holds the session; `core/auth.interceptor.ts` adds the bearer token to identity's own user routes only and retries once through the session on `invalid_token`; `core/google.ts` loads Google Identity Services; `core/webauthn.ts`/`core/passkeys.ts` run passkey ceremonies. Pages: `login/` and `account/` (profile, link/unlink methods, delete account). UI text is Traditional Chinese. Production builds disable inlined critical CSS and SRI, which would otherwise need inline handlers or an inline import map the CSP forbids.

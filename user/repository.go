@@ -11,7 +11,8 @@ type Repository interface {
 	ListAll() ([]*User, error)
 	Find(id UserID) (*User, error)
 	FindByUsername(username string) (*User, error)
-	FindBySocialID(socialID SocialID) (*User, error)
+	// Social IDs are only unique within a provider.
+	FindBySocialID(provider SocialProvider, socialID SocialID) (*User, error)
 
 	// Close the repository
 	Close() error

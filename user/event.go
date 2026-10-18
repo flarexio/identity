@@ -53,7 +53,7 @@ func (name EventName) String() string {
 	}
 }
 
-func (name *EventName) MarshalJSON() ([]byte, error) {
+func (name EventName) MarshalJSON() ([]byte, error) {
 	jsonStr := `"` + name.String() + `"`
 	return []byte(jsonStr), nil
 }

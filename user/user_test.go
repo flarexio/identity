@@ -58,3 +58,37 @@ func TestSocialID(t *testing.T) {
 		assert.Equal(SocialID("google-123"), google)
 	}
 }
+
+// The projection orders events by time, so each event must carry the time
+// of its own change, after any event before it.
+func TestEventsAreStampedInOrder(t *testing.T) {
+	assert := assert.New(t)
+
+	u := NewUser("user01", "User01", "user01@example.com")
+	u.Register()
+	u.Activate()
+	assert.NoError(u.AddSocialAccount(GOOGLE, "g-1"))
+	assert.NoError(u.AddSocialAccount(LINE, "l-1"))
+	assert.NoError(u.RemoveSocialAccount(LINE, "l-1"))
+	u.Delete()
+
+	var last Event
+	for _, e := range u.Events() {
+		var ev *Event
+		switch e := e.(type) {
+		case *UserRegisteredEvent:
+			ev = e.Event
+		case *UserActivatedEvent:
+			ev = e.Event
+		case *UserSocialAccountAddedEvent:
+			ev = e.Event
+		case *UserSocialAccountRemovedEvent:
+			ev = e.Event
+		case *UserDeletedEvent:
+			ev = e.Event
+		}
+
+		assert.True(ev.OccuredAt.After(last.OccuredAt), "%s is not after %s", ev.EventName(), last.EventName())
+		last = *ev
+	}
+}

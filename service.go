@@ -2,442 +2,341 @@ package identity
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
-	"time"
+	"unicode"
 
 	"github.com/go-webauthn/webauthn/protocol"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
-	"google.golang.org/api/idtoken"
 
-	"github.com/flarexio/identity/conf"
 	"github.com/flarexio/identity/passkeys"
+	"github.com/flarexio/identity/provider"
 	"github.com/flarexio/identity/user"
 )
 
-var (
-	ErrProviderNotSupported = errors.New("provider not supported")
-	ErrAudienceNotFound     = errors.New("audience not found")
-	ErrEmailNotFound        = errors.New("email not found")
-	ErrNameNotFound         = errors.New("name not found")
-	ErrPictureNotFound      = errors.New("picture not found")
-	ErrLastSocialAccount    = errors.New("cannot remove the last social account")
-)
-
 type Service interface {
-	Register(username string, name string, email string) (*user.User, error)
-	OTPVerify(otp string, username string) (*user.User, error)
 	SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error)
 	AddSocialAccount(ctx context.Context, credential string, provider user.SocialProvider, username string) (*user.User, error)
-	RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error)
-	RegisterPasskey(username string) (*protocol.CredentialCreation, error)
-	User(username string) (*user.User, error)
-	UserBySocialID(socialID user.SocialID) (*user.User, error)
-	DeleteUser(username string) error
-	Handler() (EventHandler, error)
-}
+	RemoveSocialAccount(ctx context.Context, provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error)
+	RegisterPasskey(ctx context.Context, username string) (*protocol.CredentialCreation, error)
+	User(ctx context.Context, username string) (*user.User, error)
 
-type EventHandler interface {
-	UserRegisteredHandler(e *user.UserRegisteredEvent) error
-	UserActivatedHandler(e *user.UserActivatedEvent) error
-	UserSocialAccountAddedHandler(e *user.UserSocialAccountAddedEvent) error
-	UserSocialAccountRemovedHandler(e *user.UserSocialAccountRemovedEvent) error
-	UserDeletedHandler(e *user.UserDeletedEvent) error
+	// ActiveUser loads a user who may be issued tokens, for renewing them.
+	ActiveUser(ctx context.Context, id user.UserID) (*user.User, error)
+
+	// UserBySocialID finds the active user linked to socialID. An empty
+	// provider searches every provider and fails if the ID is ambiguous.
+	UserBySocialID(ctx context.Context, provider user.SocialProvider, socialID user.SocialID) (*user.User, error)
+
+	DeleteUser(ctx context.Context, username string) error
 }
 
 type ServiceMiddleware func(Service) Service
 
-func NewService(users user.Repository, passkeys passkeys.Service, cfg conf.Providers) Service {
-	return &service{cfg, users, passkeys}
+// Provider is one way of signing in.
+type Provider struct {
+	provider.Verifier
+
+	// Whether a first sign-in with an unknown identity opens an account.
+	// Passkeys cannot: a passkey is only ever registered to an existing one.
+	OpensAccounts bool
+}
+
+func NewService(users user.Repository, providers map[user.SocialProvider]Provider, passkeys passkeys.Service) Service {
+	return &service{users, providers, passkeys}
 }
 
 type service struct {
-	cfg      conf.Providers
-	users    user.Repository
-	passkeys passkeys.Service
+	users     user.Repository
+	providers map[user.SocialProvider]Provider
+	passkeys  passkeys.Service
 }
 
-func (svc *service) Register(username string, name string, email string) (*user.User, error) {
-	// Ensure username is unique
-	_, err := svc.users.FindByUsername(username)
+func (svc *service) verify(ctx context.Context, credential string, p user.SocialProvider) (*provider.Identity, Provider, error) {
+	verifier, ok := svc.providers[p]
+	if !ok {
+		return nil, Provider{}, ErrProviderNotSupported
+	}
+
+	if credential == "" {
+		return nil, Provider{}, ErrInvalidCredential
+	}
+
+	id, err := verifier.Verify(ctx, credential)
+	if err != nil {
+		return nil, Provider{}, err
+	}
+
+	return id, verifier, nil
+}
+
+func (svc *service) SignIn(ctx context.Context, credential string, p user.SocialProvider) (*user.User, error) {
+	id, verifier, err := svc.verify(ctx, credential, p)
+	if err != nil {
+		return nil, err
+	}
+
+	socialID := user.SocialID(id.Subject)
+
+	u, err := svc.users.FindBySocialID(p, socialID)
 	if err == nil {
-		return nil, errors.New("user exists")
+		if !u.Active() {
+			return nil, ErrAccountInactive
+		}
+
+		return u, nil
 	}
 
 	if !errors.Is(err, user.ErrUserNotFound) {
 		return nil, err
 	}
 
-	u := user.NewUser(username, name, email)
-	defer u.Notify()
+	if !verifier.OpensAccounts {
+		return nil, ErrNotRegistered
+	}
 
-	return u, nil
-}
-
-func (svc *service) OTPVerify(otp string, username string) (*user.User, error) {
-	u, err := svc.users.FindByUsername(username)
+	username, err := svc.uniqueUsername(id)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: otp verify
+	u = user.NewUser(username, id.Name, id.Email)
+	u.Avatar = id.Picture
+
+	u.Register()
 	u.Activate()
-	defer u.Notify()
+	if err := u.AddSocialAccount(p, socialID); err != nil {
+		return nil, err
+	}
+
+	// The account exists once these events are published; the repository
+	// catches up when the projection consumes them.
+	if err := u.Notify(); err != nil {
+		return nil, fmt.Errorf("publish events: %w", err)
+	}
 
 	return u, nil
 }
 
-func (svc *service) SignIn(ctx context.Context, credential string, provider user.SocialProvider) (*user.User, error) {
-	switch provider {
-	case user.GOOGLE:
-		return svc.signInWithGoogle(ctx, credential)
+// uniqueUsername derives a username from the e-mail address's local part,
+// adding a random suffix when it is taken.
+func (svc *service) uniqueUsername(id *provider.Identity) (string, error) {
+	local, _, _ := strings.Cut(id.Email, "@")
+	base := sanitizeUsername(local)
 
-	case user.LINE:
-		return svc.signInWithLINE(ctx, credential)
-
-	case user.PASSKEYS:
-		return svc.signInWithPasskeys(credential)
-
-	default:
-		return nil, ErrProviderNotSupported
-	}
-}
-
-func (svc *service) signInWithGoogle(ctx context.Context, token string) (*user.User, error) {
-	audience := svc.cfg.Google.Client.ID
-	if audience == "" {
-		return nil, ErrAudienceNotFound
+	if base != "" {
+		_, err := svc.users.FindByUsername(base)
+		if errors.Is(err, user.ErrUserNotFound) {
+			return base, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	} else {
+		base = "user"
 	}
 
-	payload, err := idtoken.Validate(ctx, token, audience)
-	if err != nil {
-		return nil, err
-	}
-
-	socialID := user.SocialID(payload.Subject)
-
-	u, err := svc.users.FindBySocialID(socialID)
-	if err != nil {
-		if !errors.Is(err, user.ErrUserNotFound) {
-			return nil, err
+	for range 5 {
+		suffix := make([]byte, 4)
+		if _, err := rand.Read(suffix); err != nil {
+			return "", err
 		}
 
-		// New User
-		email, ok := payload.Claims["email"].(string)
-		if !ok {
-			return nil, ErrEmailNotFound
-		}
+		username := base + "." + hex.EncodeToString(suffix)
 
-		name, ok := payload.Claims["name"].(string)
-		if !ok {
-			return nil, ErrNameNotFound
-		}
-
-		username := strings.Split(email, "@")[0]
-
-		// Ensure username is unique
 		_, err := svc.users.FindByUsername(username)
-		if err == nil {
-			username = username + "." + uuid.NewString()[:8]
-		} else if !errors.Is(err, user.ErrUserNotFound) {
-			return nil, err
+		if errors.Is(err, user.ErrUserNotFound) {
+			return username, nil
 		}
-
-		u = user.NewUser(username, name, email)
-
-		picture, ok := payload.Claims["picture"].(string)
-		if ok {
-			u.Avatar = picture
+		if err != nil {
+			return "", err
 		}
-
-		u.Register()
-		u.Activate()
-		u.AddSocialAccount(user.GOOGLE, socialID)
-
-		defer u.Notify()
 	}
 
-	// TODO: check if user exists and update from google
-
-	return u, nil
+	return "", errors.New("could not find a free username")
 }
 
-type LINEClaims struct {
-	jwt.RegisteredClaims
-	Nonce   string `json:"nonce"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
-	Email   string `json:"email"`
+const maxUsernameLength = 32
+
+// sanitizeUsername keeps a username safe to put in a URL path and a JWT sub:
+// lower-case ASCII letters, digits, '.', '_' and '-'.
+func sanitizeUsername(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if r > unicode.MaxASCII {
+			continue
+		}
+
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+
+		if b.Len() == maxUsernameLength {
+			break
+		}
+	}
+
+	return strings.Trim(b.String(), ".-_")
 }
 
-func (svc *service) signInWithLINE(ctx context.Context, token string) (*user.User, error) {
-	cfg := svc.cfg.LINE
-
-	audience := cfg.Channel.ID
-	if audience == "" {
-		return nil, ErrAudienceNotFound
-	}
-
-	keyFn := func(t *jwt.Token) (any, error) {
-		secret := []byte(cfg.Channel.Secret)
-		return secret, nil
-	}
-
-	var claims LINEClaims
-	if _, err := jwt.ParseWithClaims(token, &claims, keyFn,
-		jwt.WithIssuer("https://access.line.me"),
-		jwt.WithAudience(audience),
-		jwt.WithLeeway(10*time.Second),
-	); err != nil {
+func (svc *service) AddSocialAccount(ctx context.Context, credential string, p user.SocialProvider, username string) (*user.User, error) {
+	u, err := svc.activeUserByName(username)
+	if err != nil {
 		return nil, err
 	}
 
-	nonce, ok := ctx.Value(user.Nonce).(string)
-	if !ok || (nonce != claims.Nonce) {
-		return nil, errors.New("invalid nonce")
+	id, _, err := svc.verify(ctx, credential, p)
+	if err != nil {
+		return nil, err
 	}
 
-	socialID := user.SocialID(claims.Subject)
+	// Identity registers passkeys under the user's own ID (RegisterPasskey),
+	// so a passkey token for anyone else is not this user's to link.
+	if p == user.PASSKEYS && id.Subject != u.ID.String() {
+		return nil, fmt.Errorf("%w: passkey belongs to another user", ErrInvalidCredential)
+	}
 
-	u, err := svc.users.FindBySocialID(socialID)
-	if err != nil {
-		if !errors.Is(err, user.ErrUserNotFound) {
-			return nil, err
+	socialID := user.SocialID(id.Subject)
+
+	owner, err := svc.users.FindBySocialID(p, socialID)
+	switch {
+	case err == nil:
+		if owner.ID == u.ID {
+			return nil, user.ErrSocialAccountExists
 		}
+		return nil, ErrAccountLinked
 
-		username := strings.Split(claims.Email, "@")[0]
+	case !errors.Is(err, user.ErrUserNotFound):
+		return nil, err
+	}
 
-		// Ensure username is unique
-		_, err := svc.users.FindByUsername(username)
-		if err == nil {
-			username = username + "." + uuid.NewString()[:8]
-		} else if !errors.Is(err, user.ErrUserNotFound) {
-			return nil, err
-		}
+	if err := u.AddSocialAccount(p, socialID); err != nil {
+		return nil, err
+	}
 
-		u = user.NewUser(username, claims.Name, claims.Email)
-		u.Avatar = claims.Picture
-
-		u.Register()
-		u.Activate()
-		u.AddSocialAccount(user.LINE, socialID)
-
-		defer u.Notify()
+	if err := u.Notify(); err != nil {
+		return nil, fmt.Errorf("publish events: %w", err)
 	}
 
 	return u, nil
 }
 
-func (svc *service) signInWithPasskeys(signed string) (*user.User, error) {
-	token, err := svc.passkeys.VerifyToken(signed)
+func (svc *service) RemoveSocialAccount(ctx context.Context, p user.SocialProvider, socialID user.SocialID, username string) (*user.User, error) {
+	u, err := svc.activeUserByName(username)
 	if err != nil {
 		return nil, err
 	}
 
-	subject, err := token.Claims.GetSubject()
-	if err != nil {
+	if err := u.RemoveSocialAccount(p, socialID); err != nil {
 		return nil, err
 	}
 
-	socialID := user.SocialID(subject)
-	return svc.users.FindBySocialID(socialID)
+	if err := u.Notify(); err != nil {
+		return nil, fmt.Errorf("publish events: %w", err)
+	}
+
+	return u, nil
 }
 
-func (svc *service) AddSocialAccount(ctx context.Context, credential string, provider user.SocialProvider, username string) (*user.User, error) {
-	u, err := svc.users.FindByUsername(username)
-	if err != nil {
-		return nil, err
-	}
-
-	var subject string
-	switch provider {
-	case user.GOOGLE:
-		audience := svc.cfg.Google.Client.ID
-		if audience == "" {
-			return nil, ErrAudienceNotFound
-		}
-
-		payload, err := idtoken.Validate(ctx, credential, audience)
-		if err != nil {
-			return nil, err
-		}
-
-		subject = payload.Subject
-
-	case user.LINE:
-		cfg := svc.cfg.LINE
-
-		audience := cfg.Channel.ID
-		if audience == "" {
-			return nil, ErrAudienceNotFound
-		}
-
-		keyFn := func(t *jwt.Token) (any, error) {
-			secret := []byte(cfg.Channel.Secret)
-			return secret, nil
-		}
-
-		var claims LINEClaims
-		if _, err := jwt.ParseWithClaims(credential, &claims, keyFn,
-			jwt.WithIssuer("https://access.line.me"),
-			jwt.WithAudience(audience),
-			jwt.WithLeeway(10*time.Second),
-		); err != nil {
-			return nil, err
-		}
-
-		nonce, ok := ctx.Value(user.Nonce).(string)
-		if !ok || (nonce != claims.Nonce) {
-			return nil, errors.New("invalid nonce")
-		}
-
-		subject = claims.Subject
-
-	case user.PASSKEYS:
-		token, err := svc.passkeys.VerifyToken(credential)
-		if err != nil {
-			return nil, err
-		}
-
-		sub, err := token.Claims.GetSubject()
-		if err != nil {
-			return nil, err
-		}
-
-		subject = sub
-
-	default:
+func (svc *service) RegisterPasskey(ctx context.Context, username string) (*protocol.CredentialCreation, error) {
+	if svc.passkeys == nil {
 		return nil, ErrProviderNotSupported
 	}
 
-	socialID := user.SocialID(subject)
-	_, err = svc.users.FindBySocialID(socialID)
-	if err == nil {
-		return nil, errors.New("account exists")
-	}
-
-	u.AddSocialAccount(provider, socialID)
-	defer u.Notify()
-
-	return u, nil
-}
-
-func (svc *service) RemoveSocialAccount(provider user.SocialProvider, socialID user.SocialID, username string) (*user.User, error) {
-	u, err := svc.users.FindByUsername(username)
+	u, err := svc.activeUserByName(username)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(u.Accounts) <= 1 {
-		return nil, ErrLastSocialAccount
-	}
-
-	if err := u.RemoveSocialAccount(provider, socialID); err != nil {
-		return nil, err
-	}
-	defer u.Notify()
-
-	return u, nil
-}
-
-func (svc *service) RegisterPasskey(username string) (*protocol.CredentialCreation, error) {
-	u, err := svc.users.FindByUsername(username)
-	if err != nil {
-		return nil, err
-	}
-
-	// Reuse the identity user's own ID as the WebAuthn user handle so that
-	// every passkey this user registers (across devices/ceremonies) is
-	// grouped under the same user on the external Passkeys API. A fresh
-	// random ID per call would make each registration look like a
-	// different user there, breaking excludeCredentials and discoverable
-	// credential lookups.
+	// The user's own ID is the WebAuthn user handle, so every passkey they
+	// register is grouped under one user at the Passkeys API, and
+	// AddSocialAccount can tell the resulting token is theirs.
 	return svc.passkeys.InitializeRegistration(u.ID.String(), u.Username)
 }
 
-func (svc *service) User(username string) (*user.User, error) {
+func (svc *service) User(ctx context.Context, username string) (*user.User, error) {
 	return svc.users.FindByUsername(username)
 }
 
-func (svc *service) UserBySocialID(socialID user.SocialID) (*user.User, error) {
-	return svc.users.FindBySocialID(socialID)
+func (svc *service) activeUserByName(username string) (*user.User, error) {
+	u, err := svc.users.FindByUsername(username)
+	if err != nil {
+		return nil, err
+	}
+
+	if !u.Active() {
+		return nil, ErrAccountInactive
+	}
+
+	return u, nil
 }
 
-func (svc *service) DeleteUser(username string) error {
+func (svc *service) ActiveUser(ctx context.Context, id user.UserID) (*user.User, error) {
+	u, err := svc.users.Find(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !u.Active() {
+		return nil, ErrAccountInactive
+	}
+
+	return u, nil
+}
+
+func (svc *service) UserBySocialID(ctx context.Context, p user.SocialProvider, socialID user.SocialID) (*user.User, error) {
+	if socialID == "" {
+		return nil, ErrInvalidArgument
+	}
+
+	var u *user.User
+	if p != "" {
+		found, err := svc.users.FindBySocialID(p, socialID)
+		if err != nil {
+			return nil, err
+		}
+		u = found
+	} else {
+		for _, p := range []user.SocialProvider{user.GOOGLE, user.LINE, user.PASSKEYS} {
+			found, err := svc.users.FindBySocialID(p, socialID)
+			if errors.Is(err, user.ErrUserNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+
+			if u != nil && u.ID != found.ID {
+				return nil, fmt.Errorf("%w: social id is linked at several providers; name one", ErrInvalidArgument)
+			}
+			u = found
+		}
+
+		if u == nil {
+			return nil, user.ErrUserNotFound
+		}
+	}
+
+	if !u.Active() {
+		return nil, ErrAccountInactive
+	}
+
+	return u, nil
+}
+
+func (svc *service) DeleteUser(ctx context.Context, username string) error {
 	u, err := svc.users.FindByUsername(username)
 	if err != nil {
 		return err
 	}
 
 	u.Delete()
-	defer u.Notify()
+
+	if err := u.Notify(); err != nil {
+		return fmt.Errorf("publish events: %w", err)
+	}
 
 	return nil
-}
-
-func (svc *service) Handler() (EventHandler, error) {
-	return svc, nil
-}
-
-func (svc *service) UserRegisteredHandler(e *user.UserRegisteredEvent) error {
-	return svc.users.Store(&e.User)
-}
-
-func (svc *service) UserActivatedHandler(e *user.UserActivatedEvent) error {
-	u, err := svc.users.Find(e.UserID)
-	if err != nil {
-		return err
-	}
-
-	u.Status = e.Status
-	u.UpdatedAt = e.OccuredAt
-
-	return svc.users.Store(u)
-}
-
-func (svc *service) UserSocialAccountAddedHandler(e *user.UserSocialAccountAddedEvent) error {
-	u, err := svc.users.Find(e.UserID)
-	if err != nil {
-		return err
-	}
-
-	u.Accounts = append(u.Accounts, &e.Account)
-	u.UpdatedAt = e.OccuredAt
-
-	return svc.users.Store(u)
-}
-
-func (svc *service) UserSocialAccountRemovedHandler(e *user.UserSocialAccountRemovedEvent) error {
-	u, err := svc.users.Find(e.UserID)
-	if err != nil {
-		return err
-	}
-
-	var accounts []*user.SocialAccount
-	for _, a := range u.Accounts {
-		if a.Provider == e.Account.Provider && a.SocialID == e.Account.SocialID {
-			continue
-		}
-
-		accounts = append(accounts, a)
-	}
-
-	u.Accounts = accounts
-	u.UpdatedAt = e.OccuredAt
-
-	return svc.users.Store(u)
-}
-
-func (svc *service) UserDeletedHandler(e *user.UserDeletedEvent) error {
-	u, err := svc.users.Find(e.UserID)
-	if err != nil {
-		return err
-	}
-
-	u.Status = user.Revoked
-	u.UpdatedAt = e.OccuredAt
-	u.DeletedAt = e.OccuredAt
-
-	return svc.users.Delete(u)
 }

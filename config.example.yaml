@@ -3,22 +3,22 @@ name: $INSTANCE_NAME
 baseUrl: identity.flarex.io
 
 jwt:
+  # Placeholder: identity refuses to start with it. Run `identity genkey`.
   privkey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA== # ed25519_private_key_base64
-  timeout: 1h
+  timeout: 1h             # access token lifetime
   refresh:
     enabled: true
-    maximum: 1h30m
+    maximum: 1h30m        # how long after signing in tokens may be renewed (refresh and browser session)
   audiences:
   - identity.flarex.io
   - wallet.flarex.io
   - talkix.flarex.io
   - mdm.flarex.io
-  admins:                 # usernames granted the "admin" role in their token
-  - admin
+  admins: []             # user IDs (ULIDs, not usernames) granted the "admin" role
 
 scep:
   webhookID: webhook_id # stepca_scepchallenge_webhook_id
-  webhookSecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= # stepca_scepchallenge_hmac_secret_base64
+  webhookSecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= # stepca_scepchallenge_hmac_secret_base64 (>= 32 random bytes)
   webhookClientCN: Step Online CA # pin mTLS client cert Subject CN (empty = no check)
 
 persistence:
@@ -44,6 +44,13 @@ eventBus:
         {
           "ack_policy": "explicit"
         }
+  signing:
+    # Signs published user events; only signed events are applied, so that
+    # nothing else with access to users.> can rewrite accounts.
+    # Placeholder: identity refuses to start with it. Run `identity genkey`.
+    key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+    trusted: []           # public keys still accepted (previous keys while rotating)
+    allowUnsigned: false  # only to replay pre-signing history into a fresh instance
 
 providers:
   google:
@@ -66,8 +73,13 @@ providers:
     - https://identity.flarex.io
     - https://wallet.flarex.io
 
+http:
+  trustedProxies:         # CIDRs of reverse proxies whose X-Forwarded-For is believed
+  - 10.0.0.0/8
+  web: ""                 # built frontend directory (default: $IDENTITY_PATH/web)
+
 mtls:
-  allowedOUs:
+  allowedOUs:             # client certificate OUs allowed to mint tokens and SCEP challenges
   - Service
 
 test:

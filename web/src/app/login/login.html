@@ -1,0 +1,43 @@
+<section class="card">
+  <h1>登入</h1>
+  <p class="lead">
+    選擇一種方式登入你的 Flarex 帳號。第一次使用 Google 或 LINE 登入時會自動建立帳號。
+  </p>
+
+  @if (message(); as m) {
+    <p class="alert" role="alert">{{ m }}</p>
+  }
+
+  @if (config(); as cfg) {
+    <div class="methods" [attr.aria-busy]="busy()">
+      @if (cfg.google_client_id) {
+        @if (!googleFailed()) {
+          <div class="google" #googleButton></div>
+        } @else {
+          <p class="muted unavailable">Google 登入暫時無法使用。</p>
+        }
+      }
+
+      @if (cfg.line) {
+        <!-- A full navigation: the flow is bound to this browser by a cookie. -->
+        <a class="button line" href="/auth/line">
+          <span class="mark" aria-hidden="true">LINE</span>
+          使用 LINE 登入
+        </a>
+      }
+
+      @if (cfg.passkeys && webauthn) {
+        <button type="button" class="button" (click)="withPasskey()" [disabled]="busy()">
+          <span class="mark" aria-hidden="true">🔑</span>
+          使用通行金鑰登入
+        </button>
+      }
+
+      @if (!cfg.google_client_id && !cfg.line && !cfg.passkeys) {
+        <p class="muted">目前沒有可用的登入方式。</p>
+      }
+    </div>
+  } @else {
+    <p class="muted">載入中…</p>
+  }
+</section>
